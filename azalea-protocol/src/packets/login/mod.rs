@@ -3,6 +3,7 @@ pub mod clientbound_game_profile_packet;
 pub mod clientbound_hello_packet;
 pub mod clientbound_login_compression_packet;
 pub mod clientbound_login_disconnect_packet;
+pub mod clientbound_login_error_packet;
 pub mod serverbound_custom_query_packet;
 pub mod serverbound_hello_packet;
 pub mod serverbound_key_packet;
@@ -22,5 +23,6 @@ declare_state_packets!(
         0x02: clientbound_game_profile_packet::ClientboundGameProfilePacket,
         0x03: clientbound_login_compression_packet::ClientboundLoginCompressionPacket,
         0x04: clientbound_custom_query_packet::ClientboundCustomQueryPacket,
+        0x17: clientbound_login_error_packet::ClientboundLoginErrorPacket,
     }
 );

@@ -1,6 +1,8 @@
 use crate::{bot, pathfinder, HandleFn};
 use azalea_client::{Account, Client, Plugins};
-use azalea_protocol::ServerAddress;
+use azalea_protocol::{
+    packets::handshake::client_intention_packet::ClientIdentifier, ServerAddress,
+};
 use std::{future::Future, sync::Arc};
 use thiserror::Error;
 
@@ -39,6 +41,8 @@ where
     ///
     /// [`ServerAddress`]: azalea_protocol::ServerAddress
     pub address: A,
+    /// Marks the client as either vanilla, forge, or fabric
+    pub identifier: ClientIdentifier,
     /// The account that's going to join the server.
     pub account: Account,
     /// The plugins that are going to be used. Plugins are external crates that
@@ -95,6 +99,7 @@ pub enum StartError {
 /// let error = azalea::start(azalea::Options {
 ///     account,
 ///     address: "localhost",
+///     identifier: ClientIdentifier::Vanilla,
 ///     state: State::default(),
 ///     plugins: plugins![azalea_pathfinder::Plugin],
 ///     handle,
@@ -112,7 +117,7 @@ pub async fn start<
         Err(_) => return Err(StartError::InvalidAddress),
     };
 
-    let (mut bot, mut rx) = Client::join(&options.account, address).await?;
+    let (mut bot, mut rx) = Client::join(&options.account, address, &options.identifier).await?;
 
     let mut plugins = options.plugins;
     // DEFAULT PLUGINS

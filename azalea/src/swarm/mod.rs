@@ -7,6 +7,7 @@ use crate::{bot, HandleFn};
 use azalea_client::{Account, ChatPacket, Client, Event, JoinError, Plugins};
 use azalea_protocol::{
     connect::{Connection, ConnectionError},
+    packets::handshake::client_intention_packet::ClientIdentifier,
     resolver::{self, ResolverError},
     ServerAddress,
 };
@@ -77,7 +78,8 @@ pub enum SwarmEvent {
     Chat(ChatPacket),
 }
 
-pub type SwarmHandleFn<Fut, S, SS> = fn(Swarm<S>, SwarmEvent, SS) -> Fut;
+pub type SwarmHandleFn<Fut, S, SS, ClientIdentifier> =
+    fn(Swarm<S>, SwarmEvent, SS, ClientIdentifier) -> Fut;
 
 /// The options that are passed to [`azalea::start_swarm`].
 ///
@@ -96,6 +98,8 @@ where
     pub address: A,
     /// The accounts that are going to join the server.
     pub accounts: Vec<Account>,
+    /// Marks the client as either vanilla, forge, or fabric
+    pub identifier: ClientIdentifier,
     /// The plugins that are going to be used for all the bots.
     ///
     /// You can usually leave this as `plugins![]`.
@@ -113,7 +117,7 @@ where
     pub handle: HandleFn<Fut, S>,
     /// The function that's called every time the swarm receives a
     /// [`SwarmEvent`].
-    pub swarm_handle: SwarmHandleFn<SwarmFut, S, SS>,
+    pub swarm_handle: SwarmHandleFn<SwarmFut, S, SS, ClientIdentifier>,
 
     /// How long we should wait between each bot joining the server. Set to
     /// None to have every bot connect at the same time. None is different than
@@ -162,6 +166,7 @@ pub enum SwarmStartError {
 ///         let e = azalea::start_swarm(azalea::SwarmOptions {
 ///             accounts: accounts.clone(),
 ///             address: "localhost",
+///             identifier: ClientIdentifier::Vanilla
 ///
 ///             states: states.clone(),
 ///             swarm_state: SwarmState::default(),
@@ -189,13 +194,14 @@ pub enum SwarmStartError {
 /// async fn swarm_handle(
 ///     mut swarm: Swarm<State>,
 ///     event: SwarmEvent,
+///     identifier: ClientIdentifier
 ///     _state: SwarmState,
 /// ) -> anyhow::Result<()> {
 ///     match &event {
 ///         SwarmEvent::Disconnect(account) => {
 ///             // automatically reconnect after 5 seconds
 ///             tokio::time::sleep(Duration::from_secs(5)).await;
-///             swarm.add(account, State::default()).await?;
+///             swarm.add(account, identifier, State::default()).await?;
 ///         }
 ///         SwarmEvent::Chat(m) => {
 ///             println!("{}", m.message().to_ansi());
@@ -272,7 +278,7 @@ pub async fn start_swarm<
             // if there's a join delay, then join one by one
             for (account, state) in options.accounts.iter().zip(options.states) {
                 swarm_clone
-                    .add_with_exponential_backoff(account, state.clone())
+                    .add_with_exponential_backoff(account, options.identifier, state.clone())
                     .await;
                 tokio::time::sleep(join_delay).await;
             }
@@ -282,7 +288,7 @@ pub async fn start_swarm<
                 async move |(account, state)| -> Result<(), JoinError> {
                     swarm_borrow
                         .clone()
-                        .add_with_exponential_backoff(account, state.clone())
+                        .add_with_exponential_backoff(account, options.identifier, state.clone())
                         .await;
                     Ok(())
                 },
@@ -306,6 +312,7 @@ pub async fn start_swarm<
                 swarm_clone.clone(),
                 event,
                 swarm_state.clone(),
+                options.identifier,
             ));
         }
     });
@@ -345,9 +352,15 @@ where
 {
     /// Add a new account to the swarm. You can remove it later by calling
     /// [`Client::disconnect`].
-    pub async fn add(&mut self, account: &Account, state: S) -> Result<Client, JoinError> {
+    pub async fn add(
+        &mut self,
+        account: &Account,
+        identifier: ClientIdentifier,
+        state: S,
+    ) -> Result<Client, JoinError> {
         let conn = Connection::new(&self.resolved_address).await?;
-        let (conn, game_profile) = Client::handshake(conn, account, &self.address.clone()).await?;
+        let (conn, game_profile) =
+            Client::handshake(conn, &identifier, account, &self.address.clone()).await?;
 
         // tx is moved to the bot so it can send us events
         // rx is used to receive events from the bot
@@ -399,10 +412,15 @@ where
     ///
     /// Exponential backoff means if it fails joining it will initially wait 10
     /// seconds, then 20, then 40, up to 2 minutes.
-    pub async fn add_with_exponential_backoff(&mut self, account: &Account, state: S) -> Client {
+    pub async fn add_with_exponential_backoff(
+        &mut self,
+        account: &Account,
+        identifier: ClientIdentifier,
+        state: S,
+    ) -> Client {
         let mut disconnects = 0;
         loop {
-            match self.add(account, state.clone()).await {
+            match self.add(account, identifier, state.clone()).await {
                 Ok(bot) => return bot,
                 Err(e) => {
                     disconnects += 1;

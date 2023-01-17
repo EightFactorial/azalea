@@ -1,6 +1,7 @@
 use azalea_buf::BufReadError;
 use azalea_buf::McBuf;
 use azalea_buf::McBufVarReadable;
+use azalea_buf::UnsizedByteArray;
 use azalea_buf::{McBufReadable, McBufVarWritable, McBufWritable};
 use azalea_core::ResourceLocation;
 use azalea_protocol_macros::ClientboundGamePacket;
@@ -13,6 +14,7 @@ pub struct ClientboundCommandsPacket {
     pub entries: Vec<BrigadierNodeStub>,
     #[var]
     pub root_index: u32,
+    extra: UnsizedByteArray,
 }
 
 #[derive(Debug, Clone)]

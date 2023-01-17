@@ -1,4 +1,4 @@
-use azalea_buf::McBuf;
+use azalea_buf::{McBuf, UnsizedByteArray};
 use azalea_protocol_macros::ClientboundGamePacket;
 use azalea_registry::OptionalRegistry;
 
@@ -12,6 +12,7 @@ pub struct ClientboundSoundPacket {
     pub volume: f32,
     pub pitch: f32,
     pub seed: u64,
+    pub extra: UnsizedByteArray,
 }
 
 #[derive(McBuf, Clone, Copy, Debug)]

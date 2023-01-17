@@ -66,6 +66,13 @@ pub fn derive_serverbound_status_packet(input: TokenStream) -> TokenStream {
         quote! {crate::packets::status::ServerboundStatusPacket},
     )
 }
+#[proc_macro_derive(ServerboundForgePacket, attributes(var))]
+pub fn derive_serverbound_forge_packet(input: TokenStream) -> TokenStream {
+    as_packet_derive(
+        input,
+        quote! {crate::packets::forge::ServerboundForgePacket},
+    )
+}
 
 #[proc_macro_derive(ClientboundGamePacket, attributes(var))]
 pub fn derive_clientbound_game_packet(input: TokenStream) -> TokenStream {
@@ -90,6 +97,13 @@ pub fn derive_clientbound_status_packet(input: TokenStream) -> TokenStream {
     as_packet_derive(
         input,
         quote! {crate::packets::status::ClientboundStatusPacket},
+    )
+}
+#[proc_macro_derive(ClientboundForgePacket, attributes(var))]
+pub fn derive_clientbound_forge_packet(input: TokenStream) -> TokenStream {
+    as_packet_derive(
+        input,
+        quote! {crate::packets::forge::ClientboundForgePacket},
     )
 }
 

@@ -3,6 +3,7 @@ use azalea::pathfinder::BlockPosGoal;
 use azalea::{prelude::*, BlockPos, Swarm, SwarmEvent, WalkDirection};
 use azalea::{Account, Client, Event};
 use azalea_protocol::packets::game::serverbound_client_command_packet::ServerboundClientCommandPacket;
+use azalea_protocol::packets::handshake::client_intention_packet::ClientIdentifier;
 use std::time::Duration;
 
 #[derive(Default, Clone)]
@@ -51,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         let e = azalea::start_swarm(azalea::SwarmOptions {
             accounts: accounts.clone(),
             address: "localhost",
+            identifier: ClientIdentifier::Vanilla,
 
             states: states.clone(),
             swarm_state: SwarmState::default(),
@@ -127,12 +129,13 @@ async fn swarm_handle(
     mut swarm: Swarm<State>,
     event: SwarmEvent,
     _state: SwarmState,
+    identifier: ClientIdentifier,
 ) -> anyhow::Result<()> {
     match &event {
         SwarmEvent::Disconnect(account) => {
             println!("bot got kicked! {}", account.username);
             tokio::time::sleep(Duration::from_secs(5)).await;
-            swarm.add(account, State::default()).await?;
+            swarm.add(account, identifier, State::default()).await?;
         }
         SwarmEvent::Chat(m) => {
             println!("swarm chat message: {}", m.message().to_ansi());

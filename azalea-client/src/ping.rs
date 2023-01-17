@@ -3,7 +3,7 @@
 use azalea_protocol::{
     connect::{Connection, ConnectionError},
     packets::{
-        handshake::client_intention_packet::ClientIntentionPacket,
+        handshake::{client_intention_packet::ClientIntentionPacket, ClientIdentifier},
         status::{
             clientbound_status_response_packet::ClientboundStatusResponsePacket,
             serverbound_status_request_packet::ServerboundStatusRequestPacket,
@@ -45,6 +45,7 @@ pub enum PingError {
 /// ```
 pub async fn ping_server(
     address: impl TryInto<ServerAddress>,
+    identifier: ClientIdentifier,
 ) -> Result<ClientboundStatusResponsePacket, PingError> {
     let address: ServerAddress = address.try_into().map_err(|_| PingError::InvalidAddress)?;
 
@@ -59,6 +60,7 @@ pub async fn ping_server(
             hostname: address.host.clone(),
             port: address.port,
             intention: ConnectionProtocol::Status,
+            identifier,
         }
         .get(),
     )

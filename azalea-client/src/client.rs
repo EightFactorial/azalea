@@ -1,11 +1,17 @@
 pub use crate::chat::ChatPacket;
 use crate::{movement::WalkDirection, plugins::PluginStates, Account, PlayerInfo};
 use azalea_auth::{game_profile::GameProfile, sessionserver::SessionServerError};
+use azalea_buf::McBufReadable;
 use azalea_chat::Component;
 use azalea_core::{ChunkPos, ResourceLocation, Vec3};
 use azalea_protocol::{
     connect::{Connection, ConnectionError, ReadConnection, WriteConnection},
     packets::{
+        forge::{
+            serverbound_acknowledge_packet::ServerboundAcknowledgePacket,
+            serverbound_mod_list_reply_packet::ServerboundModListReplyPacket,
+            ClientboundForgePacket,
+        },
         game::{
             clientbound_player_combat_kill_packet::ClientboundPlayerCombatKillPacket,
             serverbound_accept_teleportation_packet::ServerboundAcceptTeleportationPacket,
@@ -16,13 +22,14 @@ use azalea_protocol::{
             ClientboundGamePacket, ServerboundGamePacket,
         },
         handshake::{
-            client_intention_packet::ClientIntentionPacket, ClientboundHandshakePacket,
-            ServerboundHandshakePacket,
+            client_intention_packet::ClientIntentionPacket, ClientIdentifier,
+            ClientboundHandshakePacket, ServerboundHandshakePacket,
         },
         login::{
-            serverbound_custom_query_packet::ServerboundCustomQueryPacket,
+            serverbound_custom_query_packet::{CustomQuery, ServerboundCustomQueryPacket},
             serverbound_hello_packet::ServerboundHelloPacket,
-            serverbound_key_packet::ServerboundKeyPacket, ClientboundLoginPacket,
+            serverbound_key_packet::ServerboundKeyPacket,
+            ClientboundLoginPacket,
         },
         ConnectionProtocol, PROTOCOL_VERSION,
     },
@@ -221,12 +228,13 @@ impl Client {
     pub async fn join(
         account: &Account,
         address: impl TryInto<ServerAddress>,
+        identifier: &ClientIdentifier,
     ) -> Result<(Self, Receiver<Event>), JoinError> {
         let address: ServerAddress = address.try_into().map_err(|_| JoinError::InvalidAddress)?;
         let resolved_address = resolver::resolve_address(&address).await?;
 
         let conn = Connection::new(&resolved_address).await?;
-        let (conn, game_profile) = Self::handshake(conn, account, &address).await?;
+        let (conn, game_profile) = Self::handshake(conn, &identifier, account, &address).await?;
 
         // The buffer has to be 1 to avoid a bug where if it lags events are
         // received a bit later instead of the instant they were fired.
@@ -252,6 +260,7 @@ impl Client {
     /// it's expired.
     pub async fn handshake(
         mut conn: Connection<ClientboundHandshakePacket, ServerboundHandshakePacket>,
+        identifier: &ClientIdentifier,
         account: &Account,
         address: &ServerAddress,
     ) -> Result<
@@ -268,10 +277,12 @@ impl Client {
                 hostname: address.host.clone(),
                 port: address.port,
                 intention: ConnectionProtocol::Login,
+                identifier: identifier.clone(),
             }
             .get(),
         )
         .await?;
+
         let mut conn = conn.login();
 
         // login
@@ -352,15 +363,71 @@ impl Client {
                     return Err(JoinError::Disconnect { reason: p.reason });
                 }
                 ClientboundLoginPacket::CustomQuery(p) => {
-                    debug!("Got custom query {:?}", p);
-                    conn.write(
-                        ServerboundCustomQueryPacket {
-                            transaction_id: p.transaction_id,
-                            data: None,
+                    if ClientIdentifier::Forge == *identifier
+                        && p.identifier.to_string() == String::from("fml:loginwrapper")
+                    {
+                        let buf_data = p.data.to_vec();
+                        let mut buf: Cursor<&[u8]> = Cursor::new(&buf_data);
+
+                        let channel = ResourceLocation::read_from(&mut buf)
+                            .expect("Error reading fml channel");
+                        if let Ok(packet) = ClientboundForgePacket::read_from_buf(&mut buf).await {
+                            debug!("Got forge packet {:?}", packet);
+                            match packet {
+                                ClientboundForgePacket::ModData(_) => {}
+                                ClientboundForgePacket::ChannelMismatchData(_) => {}
+                                ClientboundForgePacket::ModList(m) => {
+                                    conn.write(
+                                        ServerboundCustomQueryPacket {
+                                            transaction_id: p.transaction_id,
+                                            query: Some(CustomQuery {
+                                                identifier: channel,
+                                                data: ServerboundModListReplyPacket::from(m)
+                                                    .get()
+                                                    .write_to_vec()
+                                                    .await?
+                                                    .into(),
+                                            }),
+                                        }
+                                        .get(),
+                                    )
+                                    .await?;
+                                }
+                                _ => {
+                                    conn.write(
+                                        ServerboundCustomQueryPacket {
+                                            transaction_id: p.transaction_id,
+                                            query: Some(CustomQuery {
+                                                identifier: channel,
+                                                data: ServerboundAcknowledgePacket::new()
+                                                    .get()
+                                                    .write_to_vec()
+                                                    .await?
+                                                    .into(),
+                                            }),
+                                        }
+                                        .get(),
+                                    )
+                                    .await?;
+                                }
+                            }
+                        } else {
+                            error!("Unable to decode Forge packet {:?}", buf_data);
                         }
-                        .get(),
-                    )
-                    .await?;
+                    } else {
+                        debug!("Got custom query {:?}", p);
+                        conn.write(
+                            ServerboundCustomQueryPacket {
+                                transaction_id: p.transaction_id,
+                                query: None,
+                            }
+                            .get(),
+                        )
+                        .await?;
+                    }
+                }
+                ClientboundLoginPacket::LoginError(p) => {
+                    debug!("Recieved Login Error {p:?}");
                 }
             }
         };

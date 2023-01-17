@@ -3,11 +3,25 @@ use azalea_buf::{
 };
 use azalea_core::{ResourceLocation, Slot};
 use azalea_protocol_macros::ClientboundGamePacket;
+use log::debug;
 use std::io::{Cursor, Write};
 
-#[derive(Clone, Debug, McBuf, ClientboundGamePacket)]
+#[derive(Clone, Debug, McBufWritable, ClientboundGamePacket)]
 pub struct ClientboundUpdateRecipesPacket {
     pub recipes: Vec<Recipe>,
+}
+
+// To prevent a crash on recieving unknown recipe types
+// Probably invalidates all future recipes sent after an unknown one
+impl McBufReadable for ClientboundUpdateRecipesPacket {
+    fn read_from(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {
+        let mut recipes = Vec::new();
+        (0..u32::var_read_from(buf)?).for_each(|_| match Recipe::read_from(buf) {
+            Ok(r) => recipes.push(r),
+            Err(e) => debug!("{e:?}"),
+        });
+        Ok(Self { recipes })
+    }
 }
 
 #[derive(Clone, Debug)]

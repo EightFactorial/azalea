@@ -1,7 +1,7 @@
 use azalea_buf::{BufReadError, McBufReadable, McBufWritable};
 use azalea_chat::Component;
 use azalea_protocol_macros::ClientboundStatusPacket;
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Serialize};
 use serde_json::{value::Serializer, Value};
 use std::io::{Cursor, Write};
 
@@ -42,6 +42,66 @@ pub struct ClientboundStatusResponsePacket {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "enforcesSecureChat")]
     pub enforces_secure_chat: Option<bool>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "forgeData")]
+    pub fml: Option<ForgeData>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ForgeData {
+    pub mods: Vec<String>,
+    pub channels: Vec<String>,
+    pub truncated: bool,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "d")]
+    pub data: Option<ForgePingData>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ForgePingData {
+    pub data: Vec<u8>,
+}
+
+impl Serialize for ForgePingData {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if let Ok(string) = String::from_utf8(self.data.clone()) {
+            serializer.serialize_str(&string)
+        } else {
+            Err(serde::ser::Error::custom("Inavlid String"))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ForgePingData {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_string(StringVisitor)
+    }
+}
+
+struct StringVisitor;
+impl<'de> Visitor<'de> for StringVisitor {
+    type Value = ForgePingData;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a valid String")
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(ForgePingData {
+            data: v.as_bytes().to_vec(),
+        })
+    }
 }
 
 impl McBufReadable for ClientboundStatusResponsePacket {
