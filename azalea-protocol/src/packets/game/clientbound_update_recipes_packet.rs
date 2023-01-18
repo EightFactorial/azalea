@@ -11,15 +11,58 @@ pub struct ClientboundUpdateRecipesPacket {
     pub recipes: Vec<Recipe>,
 }
 
-// To prevent a crash on recieving unknown recipe types
-// Probably invalidates all future recipes sent after an unknown one
+// Because this client is 'allowed' to join forge servers,
+// mods can introduce new types of recipes. Azalea has no
+// way to understand these new arbitrarily encoded recipes,
+// so just ignore them and try to find the next valid recipe.
+
+// Oh no, it's so unbelievably cursed.
+// The only reason it doesn't crash is all the errors
+// are ignored while the 'length' counts down at the end.
+// I don't even know if this returns all the recipes, and it
+// might never return if the final recipe is of an unknown type.
 impl McBufReadable for ClientboundUpdateRecipesPacket {
     fn read_from(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {
         let mut recipes = Vec::new();
-        (0..u32::var_read_from(buf)?).for_each(|_| match Recipe::read_from(buf) {
-            Ok(r) => recipes.push(r),
-            Err(e) => debug!("{e:?}"),
-        });
+        let mut invalid_recipe = false;
+        let mut length = u32::var_read_from(buf)?;
+        while length > 0 {
+            let pos = buf.position();
+            match Recipe::read_from(buf) {
+                Ok(r) => {
+                    invalid_recipe = false;
+                    recipes.push(r);
+                }
+                Err(e) => match e {
+                    BufReadError::UnexpectedStringEnumVariant { id: _ } => {
+                        if !invalid_recipe {
+                            invalid_recipe = true;
+                            buf.set_position(pos);
+                            if let Ok(resource_location) = ResourceLocation::read_from(buf) {
+                                debug!(
+                                    "Error parsing recipe_type {}",
+                                    resource_location.to_string()
+                                );
+                            }
+                        }
+                        buf.set_position(pos + 1);
+                    }
+                    BufReadError::UnexpectedEof {
+                        attempted_read: _,
+                        actual_read,
+                        backtrace: _,
+                    } => {
+                        if actual_read == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                },
+            }
+            if !invalid_recipe {
+                length -= 1;
+            }
+        }
         Ok(Self { recipes })
     }
 }

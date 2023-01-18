@@ -59,6 +59,9 @@ pub struct ForgeData {
     pub data: Option<ForgePingData>,
 }
 
+// Essentially 15 bits of binary data are encoded into every UTF-16 code point.
+// The resulting string is then stored in the "d" property of the resulting
+// JSON.
 #[derive(Clone, Debug)]
 pub struct ForgePingData {
     pub data: Vec<u8>,
@@ -82,25 +85,24 @@ impl<'de> Deserialize<'de> for ForgePingData {
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_string(StringVisitor)
-    }
-}
+        struct ForgePingDataVisitor;
+        impl<'de> Visitor<'de> for ForgePingDataVisitor {
+            type Value = ForgePingData;
 
-struct StringVisitor;
-impl<'de> Visitor<'de> for StringVisitor {
-    type Value = ForgePingData;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a valid String")
+            }
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a valid String")
-    }
-
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ForgePingData {
-            data: v.as_bytes().to_vec(),
-        })
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ForgePingData {
+                    data: v.as_bytes().to_vec(),
+                })
+            }
+        }
+        deserializer.deserialize_string(ForgePingDataVisitor)
     }
 }
 

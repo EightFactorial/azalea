@@ -11,15 +11,12 @@ pub struct ClientboundModDataPacket {
 impl McBufReadable for ClientboundModDataPacket {
     fn read_from(buf: &mut std::io::Cursor<&[u8]>) -> Result<Self, azalea_buf::BufReadError> {
         let mut list: HashMap<String, (String, String)> = HashMap::new();
-        (0..u32::var_read_from(buf).expect("Buffer read error")).for_each(|_| {
+        for _ in 0..u32::var_read_from(buf)? {
             list.insert(
-                String::read_from(buf).expect("Buffer read error"),
-                (
-                    String::read_from(buf).expect("Buffer read error"),
-                    String::read_from(buf).expect("Buffer read error"),
-                ),
+                String::read_from(buf)?,
+                (String::read_from(buf)?, String::read_from(buf)?),
             );
-        });
+        }
         Ok(Self { list })
     }
 }
