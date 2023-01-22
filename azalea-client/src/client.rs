@@ -228,13 +228,13 @@ impl Client {
     pub async fn join(
         account: &Account,
         address: impl TryInto<ServerAddress>,
-        identifier: &ClientIdentifier,
+        identifier: ClientIdentifier,
     ) -> Result<(Self, Receiver<Event>), JoinError> {
         let address: ServerAddress = address.try_into().map_err(|_| JoinError::InvalidAddress)?;
         let resolved_address = resolver::resolve_address(&address).await?;
 
         let conn = Connection::new(&resolved_address).await?;
-        let (conn, game_profile) = Self::handshake(conn, &identifier, account, &address).await?;
+        let (conn, game_profile) = Self::handshake(conn, identifier, account, &address).await?;
 
         // The buffer has to be 1 to avoid a bug where if it lags events are
         // received a bit later instead of the instant they were fired.
@@ -260,7 +260,7 @@ impl Client {
     /// it's expired.
     pub async fn handshake(
         mut conn: Connection<ClientboundHandshakePacket, ServerboundHandshakePacket>,
-        identifier: &ClientIdentifier,
+        identifier: ClientIdentifier,
         account: &Account,
         address: &ServerAddress,
     ) -> Result<
@@ -277,7 +277,7 @@ impl Client {
                 hostname: address.host.clone(),
                 port: address.port,
                 intention: ConnectionProtocol::Login,
-                identifier: identifier.clone(),
+                identifier,
             }
             .get(),
         )
@@ -363,8 +363,8 @@ impl Client {
                     return Err(JoinError::Disconnect { reason: p.reason });
                 }
                 ClientboundLoginPacket::CustomQuery(p) => {
-                    if ClientIdentifier::Forge == *identifier
-                        && p.identifier.to_string() == String::from("fml:loginwrapper")
+                    if ClientIdentifier::Forge == identifier
+                        && p.identifier.to_string() == "fml:loginwrapper"
                     {
                         let buf_data = p.data.to_vec();
                         let mut buf: Cursor<&[u8]> = Cursor::new(&buf_data);

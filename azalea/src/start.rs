@@ -117,7 +117,7 @@ pub async fn start<
         Err(_) => return Err(StartError::InvalidAddress),
     };
 
-    let (mut bot, mut rx) = Client::join(&options.account, address, &options.identifier).await?;
+    let (mut bot, mut rx) = Client::join(&options.account, address, options.identifier).await?;
 
     let mut plugins = options.plugins;
     // DEFAULT PLUGINS

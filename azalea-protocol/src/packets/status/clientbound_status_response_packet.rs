@@ -3,10 +3,7 @@ use azalea_chat::Component;
 use azalea_protocol_macros::ClientboundStatusPacket;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
 use serde_json::{value::Serializer, Value};
-use std::{
-    collections::HashMap,
-    io::{Cursor, Write},
-};
+use std::io::{Cursor, Write};
 
 // the entire packet is just json, which is why it has deserialize
 #[derive(Clone, Debug, Serialize, Deserialize, ClientboundStatusPacket)]
@@ -105,7 +102,7 @@ impl Serialize for ForgeData {
                 Err(e) => Err(serde::ser::Error::custom(e)),
                 Ok(s) => {
                     let mut ser = serializer.serialize_struct("", 5)?;
-                    ser.serialize_field("mods", &HashMap::<String, Option<String>>::new())?;
+                    ser.serialize_field("mods", &Vec::<ForgeModData>::new())?;
                     ser.serialize_field("channels", &Vec::<ForgeChannelData>::new())?;
                     ser.serialize_field("truncated", &self.truncated)?;
                     ser.serialize_field("d", &s)?;
@@ -340,7 +337,7 @@ impl ForgeData {
                 .collect::<Vec<_>>();
 
             let channel_size = channel_info.len();
-            let flag = (channel_size << 1) | if mod_data.version.is_some() { 0b1 } else { 0b0 };
+            let flag = (channel_size << 1) | usize::from(mod_data.version.is_some());
             (flag as u32).var_write_into(buf)?;
             mod_data.name.write_into(buf)?;
 

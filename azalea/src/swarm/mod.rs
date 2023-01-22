@@ -360,7 +360,7 @@ where
     ) -> Result<Client, JoinError> {
         let conn = Connection::new(&self.resolved_address).await?;
         let (conn, game_profile) =
-            Client::handshake(conn, &identifier, account, &self.address.clone()).await?;
+            Client::handshake(conn, identifier, account, &self.address.clone()).await?;
 
         // tx is moved to the bot so it can send us events
         // rx is used to receive events from the bot

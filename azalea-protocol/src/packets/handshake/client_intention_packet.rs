@@ -18,7 +18,7 @@ pub struct ClientIntentionPacket {
 impl McBufWritable for ClientIntentionPacket {
     fn write_into(&self, buf: &mut impl std::io::Write) -> Result<(), std::io::Error> {
         self.protocol_version.var_write_into(buf)?;
-        format!("{0}{1}", self.hostname, self.identifier.to_string()).write_into(buf)?;
+        format!("{0}{1}", self.hostname, self.identifier).write_into(buf)?;
         self.port.write_into(buf)?;
         self.intention.write_into(buf)?;
         Ok(())

@@ -47,10 +47,7 @@ impl ServerboundForgePacket {
     pub async fn read_from_buf(
         buf: &mut (impl Read + AsyncRead + Send + Sync + Unpin),
     ) -> Result<ServerboundForgePacket, Box<ReadPacketError>> {
-        Ok(
-            read_packet::<ServerboundForgePacket, _>(buf, &mut BytesMut::new(), None, &mut None)
-                .await?,
-        )
+        read_packet::<ServerboundForgePacket, _>(buf, &mut BytesMut::new(), None, &mut None).await
     }
 }
 
@@ -72,9 +69,6 @@ impl ClientboundForgePacket {
     pub async fn read_from_buf(
         buf: &mut (impl Read + AsyncRead + Send + Sync + Unpin),
     ) -> Result<ClientboundForgePacket, Box<ReadPacketError>> {
-        Ok(
-            read_packet::<ClientboundForgePacket, _>(buf, &mut BytesMut::new(), None, &mut None)
-                .await?,
-        )
+        read_packet::<ClientboundForgePacket, _>(buf, &mut BytesMut::new(), None, &mut None).await
     }
 }

@@ -1,5 +1,7 @@
 pub mod client_intention_packet;
 
+use std::fmt::Display;
+
 use azalea_protocol_macros::declare_state_packets;
 
 declare_state_packets!(
@@ -24,21 +26,24 @@ impl Default for ClientIdentifier {
     }
 }
 
-impl ClientIdentifier {
-    pub fn to_string(&self) -> String {
-        match &self {
-            ClientIdentifier::Vanilla => String::new(),
-            ClientIdentifier::Forge => String::from("\0FML3\0"),
+impl Display for ClientIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ClientIdentifier::Vanilla => "",
+            ClientIdentifier::Forge => "\0FML3\0",
             ClientIdentifier::Fabric => todo!(),
-        }
+        })
     }
+}
 
+impl ClientIdentifier {
     pub fn split_from_ip(ip: String) -> (String, ClientIdentifier) {
         let identifier = if ip.ends_with("\0FML3\0") {
             ClientIdentifier::Forge
         } else {
             ClientIdentifier::Vanilla
         };
+
         let hostname = match identifier {
             ClientIdentifier::Vanilla => ip,
             _ => ip
@@ -46,6 +51,7 @@ impl ClientIdentifier {
                 .0
                 .to_string(),
         };
+
         (hostname, identifier)
     }
 }
