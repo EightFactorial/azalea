@@ -29,9 +29,8 @@ impl Default for ClientIdentifier {
 impl Display for ClientIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            ClientIdentifier::Vanilla => "",
             ClientIdentifier::Forge => "\0FML3\0",
-            ClientIdentifier::Fabric => todo!(),
+            _ => "",
         })
     }
 }
@@ -45,11 +44,11 @@ impl ClientIdentifier {
         };
 
         let hostname = match identifier {
-            ClientIdentifier::Vanilla => ip,
-            _ => ip
+            ClientIdentifier::Forge => ip
                 .split_at(ip.len() - identifier.to_string().len())
                 .0
                 .to_string(),
+            _ => ip,
         };
 
         (hostname, identifier)

@@ -7,6 +7,7 @@ use azalea_core::{ChunkPos, ResourceLocation, Vec3};
 use azalea_protocol::{
     connect::{Connection, ConnectionError, ReadConnection, WriteConnection},
     packets::{
+        fabric::ClientboundFabricRegistryPacket,
         forge::{
             serverbound_acknowledge_packet::ServerboundAcknowledgePacket,
             serverbound_mod_list_reply_packet::ServerboundModListReplyPacket,
@@ -362,59 +363,8 @@ impl Client {
                     debug!("Got disconnect {:?}", p);
                     return Err(JoinError::Disconnect { reason: p.reason });
                 }
-                ClientboundLoginPacket::CustomQuery(p) => {
-                    if ClientIdentifier::Forge == identifier
-                        && p.identifier.to_string() == "fml:loginwrapper"
-                    {
-                        let buf_data = p.data.to_vec();
-                        let mut buf: Cursor<&[u8]> = Cursor::new(&buf_data);
-
-                        let channel = ResourceLocation::read_from(&mut buf)
-                            .expect("Error reading fml channel");
-                        if let Ok(packet) = ClientboundForgePacket::read_from_buf(&mut buf).await {
-                            debug!("Got forge packet {:?}", packet);
-                            match packet {
-                                ClientboundForgePacket::ModData(_) => {}
-                                ClientboundForgePacket::ChannelMismatchData(_) => {}
-                                ClientboundForgePacket::ModList(m) => {
-                                    conn.write(
-                                        ServerboundCustomQueryPacket {
-                                            transaction_id: p.transaction_id,
-                                            query: Some(CustomQuery {
-                                                identifier: channel,
-                                                data: ServerboundModListReplyPacket::from(m)
-                                                    .get()
-                                                    .write_to_vec()
-                                                    .await?
-                                                    .into(),
-                                            }),
-                                        }
-                                        .get(),
-                                    )
-                                    .await?;
-                                }
-                                _ => {
-                                    conn.write(
-                                        ServerboundCustomQueryPacket {
-                                            transaction_id: p.transaction_id,
-                                            query: Some(CustomQuery {
-                                                identifier: channel,
-                                                data: ServerboundAcknowledgePacket::new()
-                                                    .get()
-                                                    .write_to_vec()
-                                                    .await?
-                                                    .into(),
-                                            }),
-                                        }
-                                        .get(),
-                                    )
-                                    .await?;
-                                }
-                            }
-                        } else {
-                            error!("Unable to decode Forge packet {:?}", buf_data);
-                        }
-                    } else {
+                ClientboundLoginPacket::CustomQuery(p) => match identifier {
+                    ClientIdentifier::Vanilla => {
                         debug!("Got custom query {:?}", p);
                         conn.write(
                             ServerboundCustomQueryPacket {
@@ -425,7 +375,105 @@ impl Client {
                         )
                         .await?;
                     }
-                }
+                    ClientIdentifier::Forge => {
+                        if p.identifier.to_string() == "fml:loginwrapper" {
+                            let buf_data = p.data.to_vec();
+                            let mut buf: Cursor<&[u8]> = Cursor::new(&buf_data);
+
+                            let channel = ResourceLocation::read_from(&mut buf)
+                                .expect("Error reading fml channel");
+                            if let Ok(packet) =
+                                ClientboundForgePacket::read_from_buf(&mut buf).await
+                            {
+                                debug!("Got forge packet {:?}", packet);
+                                match packet {
+                                    ClientboundForgePacket::ModData(_) => {}
+                                    ClientboundForgePacket::ChannelMismatchData(_) => {}
+                                    ClientboundForgePacket::ModList(m) => {
+                                        conn.write(
+                                            ServerboundCustomQueryPacket {
+                                                transaction_id: p.transaction_id,
+                                                query: Some(CustomQuery {
+                                                    identifier: Some(channel),
+                                                    data: ServerboundModListReplyPacket::from(m)
+                                                        .get()
+                                                        .write_to_vec()
+                                                        .await?
+                                                        .into(),
+                                                }),
+                                            }
+                                            .get(),
+                                        )
+                                        .await?;
+                                    }
+                                    _ => {
+                                        conn.write(
+                                            ServerboundCustomQueryPacket {
+                                                transaction_id: p.transaction_id,
+                                                query: Some(CustomQuery {
+                                                    identifier: Some(channel),
+                                                    data: ServerboundAcknowledgePacket::new()
+                                                        .get()
+                                                        .write_to_vec()
+                                                        .await?
+                                                        .into(),
+                                                }),
+                                            }
+                                            .get(),
+                                        )
+                                        .await?;
+                                    }
+                                }
+                            } else {
+                                debug!("Unable to decode Forge packet {:?}", buf_data);
+                            }
+                        } else {
+                            debug!("Got custom query {:?}", p);
+                            conn.write(
+                                ServerboundCustomQueryPacket {
+                                    transaction_id: p.transaction_id,
+                                    query: None,
+                                }
+                                .get(),
+                            )
+                            .await?;
+                        }
+                    }
+                    ClientIdentifier::Fabric => {
+                        let buf_data = p.data.to_vec();
+                        let mut buf: Cursor<&[u8]> = Cursor::new(&buf_data);
+
+                        match p.identifier.to_string().as_str() {
+                            "fabric-networking-api-v1:early_registration" => {
+                                if let Ok(p) = ClientboundFabricRegistryPacket::read_from(&mut buf)
+                                {
+                                    debug!("{p:?}");
+                                } else {
+                                    debug!("Unknown packet sent to fabric-networking-api-v1:early_registration: {p:?}")
+                                }
+                                conn.write(
+                                    ServerboundCustomQueryPacket {
+                                        transaction_id: p.transaction_id,
+                                        query: None,
+                                    }
+                                    .get(),
+                                )
+                                .await?;
+                            }
+                            _ => {
+                                debug!("Got custom query {:?}", p);
+                                conn.write(
+                                    ServerboundCustomQueryPacket {
+                                        transaction_id: p.transaction_id,
+                                        query: None,
+                                    }
+                                    .get(),
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                },
                 ClientboundLoginPacket::LoginError(p) => {
                     debug!("Recieved Login Error {p:?}");
                 }

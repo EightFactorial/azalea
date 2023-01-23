@@ -1,3 +1,4 @@
+pub mod fabric;
 pub mod forge;
 pub mod game;
 pub mod handshake;

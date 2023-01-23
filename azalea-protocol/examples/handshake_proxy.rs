@@ -110,6 +110,7 @@ async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
                                     version: PROXY_VERSION.clone(),
                                     previews_chat: PROXY_PREVIEWS_CHAT,
                                     enforces_secure_chat: PROXY_SECURE_CHAT,
+                                    forge: None,
                                 }
                                 .get(),
                             )
