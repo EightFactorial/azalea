@@ -13,9 +13,10 @@ mod world;
 use std::backtrace::Backtrace;
 
 pub use bit_storage::BitStorage;
-pub use chunk_storage::{Chunk, ChunkStorage, PartialChunkStorage, WeakChunkStorage};
+pub use chunk_storage::{Chunk, ChunkStorage, PartialChunkStorage, Section, WeakChunkStorage};
 pub use container::*;
 pub use entity_storage::{PartialEntityStorage, WeakEntityStorage};
+pub use palette::{Palette, PaletteType, PalettedContainer, PalettedContainerType};
 use thiserror::Error;
 pub use world::*;
 
