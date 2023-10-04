@@ -13,19 +13,18 @@ use azalea_protocol::{
 };
 use futures::FutureExt;
 use log::{error, info};
-use std::error::Error;
+use std::{error::Error, net::SocketAddr};
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpStream,
 };
-
-use crate::PROXY_ADDR;
 
 /// Turn the incoming connection into a [TcpStream]
 /// and spawn a new thread
 #[inline]
 pub fn spawn(
     conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
+    target_addr: SocketAddr,
     intent: ClientIntentionPacket,
     hello: ServerboundHelloPacket,
 ) {
@@ -34,7 +33,7 @@ pub fn spawn(
         return;
     };
 
-    tokio::spawn(proxy(inbound, intent, hello).map(|result| {
+    tokio::spawn(proxy(inbound, target_addr, intent, hello).map(|result| {
         if let Err(e) = result {
             error!("Failed to proxy: {e}");
         }
@@ -46,10 +45,11 @@ pub fn spawn(
 /// forward data from the connection to the proxy target.
 async fn proxy(
     mut inbound: TcpStream,
+    target_addr: SocketAddr,
     intent: ClientIntentionPacket,
     hello: ServerboundHelloPacket,
 ) -> Result<(), Box<dyn Error>> {
-    let outbound = TcpStream::connect(PROXY_ADDR).await?;
+    let outbound = TcpStream::connect(target_addr).await?;
     let name = hello.name.clone();
     outbound.set_nodelay(true)?;
 

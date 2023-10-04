@@ -1,6 +1,8 @@
 //! A "simple" server that gets login information and proxies connections.
 //! After login all connections are encrypted and Azalea cannot read them.
 
+use std::net::SocketAddr;
+
 use azalea_protocol::{
     connect::Connection,
     packets::{
@@ -14,9 +16,8 @@ use once_cell::sync::Lazy;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
-mod login;
 mod proxy;
-mod status;
+mod states;
 
 // The address and port to listen on
 const LISTEN_ADDR: &str = "127.0.0.1:25566";
@@ -52,6 +53,12 @@ async fn main() -> anyhow::Result<()> {
         None => TcpListener::bind(LISTEN_ADDR).await?,
     };
 
+    // Get the target address
+    let target: SocketAddr = match option_env!("PROXY_ADDR") {
+        Some(addr) => addr.parse()?,
+        None => PROXY_ADDR.parse()?,
+    };
+
     loop {
         // When a connection is made, pass it off to another thread
         let (stream, _) = listener.accept().await?;
@@ -60,14 +67,14 @@ async fn main() -> anyhow::Result<()> {
         if let Err(e) = stream.set_nodelay(true) {
             error!("Failed to set nodelay: {e}");
         } else {
-            tokio::spawn(handle_connection(stream));
+            tokio::spawn(handle_connection(stream, target));
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
+async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow::Result<()> {
     // Get the ip address of the connecting client
-    let Ok(ip) = stream.peer_addr() else {
+    let Ok(client_addr) = stream.peer_addr() else {
         error!(target: "handshake_proxy::incoming", "Failed to get ip address of client");
         return Ok(());
     };
@@ -83,7 +90,7 @@ async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
             info!(
                 target: "handshake_proxy::incoming",
                 "New connection from {0}, Version: {1}, Intent: {2}",
-                ip.ip(),
+                client_addr.ip(),
                 packet.protocol_version,
                 packet.intention
             );
@@ -101,11 +108,11 @@ async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     match intent.intention {
         ConnectionProtocol::Status => {
             // Handle the status request
-            status::handle(conn.status()).await?;
+            states::status(conn.status()).await?;
         }
         ConnectionProtocol::Login => {
             // Handle the login request
-            login::handle(conn.login(), ip, intent).await?;
+            states::login(conn.login(), client_addr, target_addr, intent).await?;
         }
         intent => {
             warn!(target: "handshake_proxy::incoming", "Client provided weird intent: {intent}");

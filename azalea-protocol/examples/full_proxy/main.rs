@@ -1,3 +1,7 @@
+//! A proxy server that fully decodes and re-encodes packets between the client
+//! and target. This can be used to modify packets, but only works for offline
+//! mode servers.
+
 use std::net::SocketAddr;
 
 use azalea_protocol::{
@@ -11,9 +15,8 @@ use log::{error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
-mod login;
 mod proxy;
-mod status;
+mod states;
 
 // The address and port to listen on
 const LISTEN_ADDR: &str = "127.0.0.1:25566";
@@ -89,11 +92,11 @@ async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow
     match intent.intention {
         ConnectionProtocol::Status => {
             // Handle the status request
-            status::handle(conn.status(), intent, target_addr).await?;
+            states::status(conn.status(), intent, target_addr).await?;
         }
         ConnectionProtocol::Login => {
             // Handle the login request
-            login::handle(conn.login(), intent, client_addr, target_addr).await?;
+            states::login(conn.login(), intent, client_addr, target_addr).await?;
         }
         intent => {
             warn!(target: "full_proxy::incoming", "Client provided weird intent: {intent}");

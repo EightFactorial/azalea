@@ -9,6 +9,8 @@ use self::wrapper::{ClientWrapper, ClientWrapperPacket, TargetWrapper, TargetWra
 
 pub mod wrapper;
 
+/// Proxy packets between the client and target,
+/// fully decoding them in the process
 pub async fn proxy(
     mut client_conn: ClientWrapper,
     mut target_conn: TargetWrapper,
@@ -61,12 +63,14 @@ fn handle_error(e: anyhow::Error, profile: &GameProfile) -> anyhow::Error {
     e
 }
 
+/// Used as a signal to change the connection type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConnType {
     Configuration,
     Game,
 }
 
+/// Handle a packet from the client
 async fn handle_client_packet(
     packet: ClientWrapperPacket,
     client_profile: &GameProfile,
@@ -119,6 +123,7 @@ async fn handle_client_packet(
     Ok(None)
 }
 
+/// Handle a packet from the target
 async fn handle_target_packet(
     packet: TargetWrapperPacket,
     client_conn: &mut ClientWrapper,

@@ -17,7 +17,8 @@ use crate::proxy;
 /// connection along to the proxy target.
 pub async fn handle(
     mut conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
-    ip: SocketAddr,
+    client_addr: SocketAddr,
+    target_addr: SocketAddr,
     intent: ClientIntentionPacket,
 ) -> anyhow::Result<()> {
     loop {
@@ -26,12 +27,12 @@ pub async fn handle(
                 info!(
                     "Player \'{0}\' from {1} logging in with uuid: {2}",
                     packet.name,
-                    ip.ip(),
+                    client_addr.ip(),
                     packet.profile_id.to_string()
                 );
 
                 // Forward the connection to the proxy target
-                proxy::spawn(conn, intent, packet);
+                proxy::spawn(conn, target_addr, intent, packet);
 
                 break;
             }
