@@ -12,6 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
 mod login;
+mod proxy;
 mod status;
 
 // The address and port to listen on

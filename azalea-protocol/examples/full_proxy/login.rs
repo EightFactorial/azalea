@@ -13,6 +13,11 @@ use azalea_protocol::{
 };
 use log::{error, info};
 
+use crate::proxy::{
+    self,
+    wrapper::{ClientWrapper, TargetWrapper},
+};
+
 /// Reply with the proxy server information
 pub async fn handle(
     mut conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
@@ -55,12 +60,17 @@ pub async fn handle(
         }
     }
 
-    info!("Login complete for `{}`", profile.name);
+    tokio::spawn(proxy::proxy(
+        ClientWrapper::Configuration(conn.configuration()),
+        TargetWrapper::Configuration(target_conn.configuration()),
+        profile,
+    ));
 
     Ok(())
 }
 
 /// Handle an error during login
+#[inline]
 fn handle_error(e: anyhow::Error, profile: &GameProfile) -> anyhow::Error {
     let name = if profile.name.is_empty() {
         "client".to_string()
@@ -99,19 +109,21 @@ async fn handle_client_packet(
                 .await?;
         }
         ServerboundLoginPacket::Key(packet) => {
-            let mut key_bytes = [0; 16];
-            for (packet_byte, key_byte) in
-                packet.key_bytes.iter().take(16).zip(key_bytes.iter_mut())
-            {
-                *key_byte = *packet_byte;
-            }
+            let key_bytes = packet.key_bytes.clone();
 
             target_conn
                 .write(ServerboundLoginPacket::Key(packet.clone()))
                 .await?;
 
-            client_conn.set_encryption_key(key_bytes);
-            target_conn.set_encryption_key(key_bytes);
+            client_conn.set_encryption_key(key_bytes.clone().try_into().unwrap());
+            target_conn.set_encryption_key(key_bytes.try_into().unwrap());
+        }
+        ServerboundLoginPacket::LoginAcknowledged(packet) => {
+            target_conn
+                .write(ServerboundLoginPacket::LoginAcknowledged(packet))
+                .await?;
+
+            info!("Player \'{0}\' has logged in!", profile.name);
 
             return Ok(Some(()));
         }
@@ -132,6 +144,8 @@ async fn handle_target_packet(
     target_conn: &mut Connection<ClientboundLoginPacket, ServerboundLoginPacket>,
     profile: &mut GameProfile,
 ) -> anyhow::Result<Option<()>> {
+    info!("Packet from target: {:?}", packet);
+
     match packet {
         ClientboundLoginPacket::Hello(_) => {
             client_conn
@@ -144,22 +158,21 @@ async fn handle_target_packet(
 
             return Err(anyhow::anyhow!("Proxy does not support online servers"));
         }
-        ClientboundLoginPacket::LoginCompression(packet) => {
-            target_conn.set_compression_threshold(packet.compression_threshold);
-
-            client_conn
-                .write(ClientboundLoginPacket::LoginCompression(packet.clone()))
-                .await?;
-            client_conn.set_compression_threshold(packet.compression_threshold);
-
-            return Ok(None);
-        }
         ClientboundLoginPacket::LoginDisconnect(packet) => {
             client_conn
                 .write(ClientboundLoginPacket::LoginDisconnect(packet.clone()))
                 .await?;
 
             return Err(anyhow::anyhow!(packet.reason.to_string()));
+        }
+        ClientboundLoginPacket::LoginCompression(packet) => {
+            let threshold = packet.compression_threshold;
+            target_conn.set_compression_threshold(threshold);
+
+            client_conn
+                .write(ClientboundLoginPacket::LoginCompression(packet))
+                .await?;
+            client_conn.set_compression_threshold(threshold);
         }
         ClientboundLoginPacket::GameProfile(packet) => {
             *profile = packet.game_profile.clone();

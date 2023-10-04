@@ -452,6 +452,15 @@ impl Connection<ServerboundLoginPacket, ClientboundLoginPacket> {
         Connection::from(self)
     }
 
+    /// Change our state from login to configuration. This is the state where
+    /// the server sends us the registries, resource packs, and other data.
+    #[must_use]
+    pub fn configuration(
+        self,
+    ) -> Connection<ServerboundConfigurationPacket, ClientboundConfigurationPacket> {
+        Connection::from(self)
+    }
+
     /// Verify connecting clients have authenticated with Minecraft's servers.
     /// This must happen after the client sends a `ServerboundLoginPacket::Key`
     /// packet.
