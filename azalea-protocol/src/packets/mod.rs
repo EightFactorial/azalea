@@ -7,7 +7,10 @@ pub mod status;
 
 use crate::read::ReadPacketError;
 use azalea_buf::{BufReadError, McBufVarReadable, McBufVarWritable, McBufWritable};
-use std::io::{Cursor, Write};
+use std::{
+    fmt::Display,
+    io::{Cursor, Write},
+};
 
 // TODO: rename the packet files to just like clientbound_add_entity instead of
 // clientbound_add_entity_packet
@@ -34,6 +37,12 @@ impl ConnectionProtocol {
             3 => Some(ConnectionProtocol::Configuration),
             _ => None,
         }
+    }
+}
+
+impl Display for ConnectionProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
