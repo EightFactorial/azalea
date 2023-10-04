@@ -25,7 +25,7 @@ pub async fn handle(
         match conn.read().await {
             Ok(ServerboundLoginPacket::Hello(packet)) => {
                 info!(
-                    "Player \'{0}\' from {1} logging in with uuid: {2}",
+                    "Player `{0}` from {1} logging in with uuid: {2}",
                     packet.name,
                     client_addr.ip(),
                     packet.profile_id.to_string()

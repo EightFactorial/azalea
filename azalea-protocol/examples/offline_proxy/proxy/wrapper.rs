@@ -16,7 +16,7 @@ pub enum ClientWrapper {
 
 /// An enum containing the two types of client packets
 #[derive(Debug)]
-pub enum ClientWrapperPacket {
+pub enum ServerboundPacketWrapper {
     Configuration(ServerboundConfigurationPacket),
     Game(ServerboundGamePacket),
 }
@@ -39,31 +39,31 @@ impl ClientWrapper {
     }
 
     /// Read a packet from the client
-    pub async fn read(&mut self) -> Result<ClientWrapperPacket, Box<ReadPacketError>> {
+    pub async fn read(&mut self) -> Result<ServerboundPacketWrapper, Box<ReadPacketError>> {
         match self {
             ClientWrapper::Configuration(conn) => {
-                Ok(ClientWrapperPacket::Configuration(conn.read().await?))
+                Ok(ServerboundPacketWrapper::Configuration(conn.read().await?))
             }
-            ClientWrapper::Game(conn) => Ok(ClientWrapperPacket::Game(conn.read().await?)),
+            ClientWrapper::Game(conn) => Ok(ServerboundPacketWrapper::Game(conn.read().await?)),
         }
     }
 
     /// Write a packet to the client
-    pub async fn write(&mut self, packet: TargetWrapperPacket) -> std::io::Result<()> {
+    pub async fn write(&mut self, packet: ClientboundPacketWrapper) -> std::io::Result<()> {
         match self {
             ClientWrapper::Configuration(conn) => match packet {
-                TargetWrapperPacket::Configuration(packet) => {
+                ClientboundPacketWrapper::Configuration(packet) => {
                     conn.write(packet).await?;
                 }
-                TargetWrapperPacket::Game(_) => {
+                ClientboundPacketWrapper::Game(_) => {
                     panic!("Attempted to write a game packet to a configuration connection")
                 }
             },
             ClientWrapper::Game(conn) => match packet {
-                TargetWrapperPacket::Configuration(_) => {
+                ClientboundPacketWrapper::Configuration(_) => {
                     panic!("Attempted to write a configuration packet to a game connection")
                 }
-                TargetWrapperPacket::Game(packet) => {
+                ClientboundPacketWrapper::Game(packet) => {
                     conn.write(packet).await?;
                 }
             },
@@ -82,7 +82,7 @@ pub enum TargetWrapper {
 
 /// An enum containing the two types of target packets
 #[derive(Debug)]
-pub enum TargetWrapperPacket {
+pub enum ClientboundPacketWrapper {
     Configuration(ClientboundConfigurationPacket),
     Game(ClientboundGamePacket),
 }
@@ -105,31 +105,31 @@ impl TargetWrapper {
     }
 
     /// Read a packet from the target server
-    pub async fn read(&mut self) -> Result<TargetWrapperPacket, Box<ReadPacketError>> {
+    pub async fn read(&mut self) -> Result<ClientboundPacketWrapper, Box<ReadPacketError>> {
         match self {
             TargetWrapper::Configuration(conn) => {
-                Ok(TargetWrapperPacket::Configuration(conn.read().await?))
+                Ok(ClientboundPacketWrapper::Configuration(conn.read().await?))
             }
-            TargetWrapper::Game(conn) => Ok(TargetWrapperPacket::Game(conn.read().await?)),
+            TargetWrapper::Game(conn) => Ok(ClientboundPacketWrapper::Game(conn.read().await?)),
         }
     }
 
     /// Write a packet to the target server
-    pub async fn write(&mut self, packet: ClientWrapperPacket) -> std::io::Result<()> {
+    pub async fn write(&mut self, packet: ServerboundPacketWrapper) -> std::io::Result<()> {
         match self {
             TargetWrapper::Configuration(conn) => match packet {
-                ClientWrapperPacket::Configuration(packet) => {
+                ServerboundPacketWrapper::Configuration(packet) => {
                     conn.write(packet).await?;
                 }
-                ClientWrapperPacket::Game(_) => {
+                ServerboundPacketWrapper::Game(_) => {
                     panic!("Attempted to write a game packet to a configuration connection")
                 }
             },
             TargetWrapper::Game(conn) => match packet {
-                ClientWrapperPacket::Configuration(_) => {
+                ServerboundPacketWrapper::Configuration(_) => {
                     panic!("Attempted to write a configuration packet to a game connection")
                 }
-                ClientWrapperPacket::Game(packet) => {
+                ServerboundPacketWrapper::Game(packet) => {
                     conn.write(packet).await?;
                 }
             },

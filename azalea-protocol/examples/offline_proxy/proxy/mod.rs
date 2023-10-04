@@ -12,7 +12,7 @@ use azalea_protocol::packets::{
 use log::{error, info};
 
 use commands::{Command, OptionalCommand};
-use wrapper::{ClientWrapper, ClientWrapperPacket, TargetWrapper, TargetWrapperPacket};
+use wrapper::{ClientWrapper, ClientboundPacketWrapper, ServerboundPacketWrapper, TargetWrapper};
 
 mod commands;
 pub mod wrapper;
@@ -82,7 +82,7 @@ enum ConnType {
 
 /// Handle packets from the client
 async fn handle_client_packet(
-    packet: ClientWrapperPacket,
+    packet: ServerboundPacketWrapper,
     client_profile: &GameProfile,
     client_information: &mut ClientInformation,
     target_conn: &mut TargetWrapper,
@@ -90,13 +90,13 @@ async fn handle_client_packet(
 ) -> anyhow::Result<Option<ConnType>> {
     match packet {
         // Forward configuration packets from the client to the target
-        ClientWrapperPacket::Configuration(packet) => match packet {
+        ServerboundPacketWrapper::Configuration(packet) => match packet {
             // Update the client information
             ServerboundConfigurationPacket::ClientInformation(packet) => {
                 *client_information = packet.information.clone();
 
                 target_conn
-                    .write(ClientWrapperPacket::Configuration(
+                    .write(ServerboundPacketWrapper::Configuration(
                         ServerboundConfigurationPacket::ClientInformation(packet),
                     ))
                     .await?;
@@ -104,102 +104,104 @@ async fn handle_client_packet(
             // Change the connection type
             ServerboundConfigurationPacket::FinishConfiguration(packet) => {
                 target_conn
-                    .write(ClientWrapperPacket::Configuration(
+                    .write(ServerboundPacketWrapper::Configuration(
                         ServerboundConfigurationPacket::FinishConfiguration(packet),
                     ))
                     .await?;
 
                 return Ok(Some(ConnType::Game));
             }
+            // Forward other packets to the target
             packet => {
                 target_conn
-                    .write(ClientWrapperPacket::Configuration(packet))
+                    .write(ServerboundPacketWrapper::Configuration(packet))
                     .await?;
             }
         },
         // Forward game packets from the client to the target
-        ClientWrapperPacket::Game(packet) => {
-            match packet {
-                // Update the client information
-                ServerboundGamePacket::ClientInformation(packet) => {
-                    *client_information = packet.information.clone();
+        ServerboundPacketWrapper::Game(packet) => match packet {
+            // Update the client information
+            ServerboundGamePacket::ClientInformation(packet) => {
+                *client_information = packet.information.clone();
 
-                    target_conn
-                        .write(ClientWrapperPacket::Game(
-                            ServerboundGamePacket::ClientInformation(packet),
-                        ))
-                        .await?;
-                }
-                // Log chat messages
-                ServerboundGamePacket::Chat(packet) => {
-                    info!("{}: {}", client_profile.name, packet.message);
+                target_conn
+                    .write(ServerboundPacketWrapper::Game(
+                        ServerboundGamePacket::ClientInformation(packet),
+                    ))
+                    .await?;
+            }
+            // Log chat messages
+            ServerboundGamePacket::Chat(packet) => {
+                info!("{}: {}", client_profile.name, packet.message);
 
-                    target_conn
-                        .write(ClientWrapperPacket::Game(ServerboundGamePacket::Chat(
-                            packet,
-                        )))
-                        .await?;
-                }
-                // Log commands
-                ServerboundGamePacket::ChatCommand(packet) => {
-                    info!("{}: /{}", client_profile.name, packet.command);
+                target_conn
+                    .write(ServerboundPacketWrapper::Game(ServerboundGamePacket::Chat(
+                        packet,
+                    )))
+                    .await?;
+            }
+            // Log commands
+            ServerboundGamePacket::ChatCommand(packet) => {
+                info!("{}: /{}", client_profile.name, packet.command);
 
-                    // Try to parse a proxy command
-                    match commands::parse_command(packet) {
-                        // Handle proxy command
-                        Ok(OptionalCommand::Some(command)) => {
-                            info!(
-                                "Player `{}` executed proxy command: {command:?}",
-                                client_profile.name
-                            );
+                // Try to parse a proxy command
+                match commands::parse_command(packet) {
+                    // Handle proxy command
+                    Ok(OptionalCommand::Some(command)) => {
+                        info!(
+                            "Player `{}` executed proxy command: {command:?}",
+                            client_profile.name
+                        );
 
-                            match command {
-                                // Send a disconnect packet to the client
-                                Command::Disconnect(reason) => {
-                                    client_conn
-                                        .write(TargetWrapperPacket::Game(
-                                            ClientboundGamePacket::Disconnect(
-                                                ClientboundDisconnectPacket {
-                                                    reason: reason.into(),
-                                                },
-                                            ),
-                                        ))
-                                        .await?;
-                                }
-                                // Send a chat message to the client
-                                Command::Echo(message) => {
-                                    client_conn
-                                        .write(TargetWrapperPacket::Game(
-                                            ClientboundGamePacket::SystemChat(
-                                                ClientboundSystemChatPacket {
-                                                    content: message.into(),
-                                                    overlay: false,
-                                                },
-                                            ),
-                                        ))
-                                        .await?;
-                                }
+                        match command {
+                            // Send a disconnect packet to the client
+                            Command::Disconnect(reason) => {
+                                client_conn
+                                    .write(ClientboundPacketWrapper::Game(
+                                        ClientboundGamePacket::Disconnect(
+                                            ClientboundDisconnectPacket {
+                                                reason: reason.into(),
+                                            },
+                                        ),
+                                    ))
+                                    .await?;
+                            }
+                            // Send a chat message to the client
+                            Command::Echo(message) => {
+                                client_conn
+                                    .write(ClientboundPacketWrapper::Game(
+                                        ClientboundGamePacket::SystemChat(
+                                            ClientboundSystemChatPacket {
+                                                content: message.into(),
+                                                overlay: false,
+                                            },
+                                        ),
+                                    ))
+                                    .await?;
                             }
                         }
-                        // Forward the command to the server
-                        Ok(OptionalCommand::None(packet)) => {
-                            target_conn
-                                .write(ClientWrapperPacket::Game(
-                                    ServerboundGamePacket::ChatCommand(packet),
-                                ))
-                                .await?;
-                        }
-                        Err(e) => {
-                            error!("Error proxying command for `{}`: {e}", client_profile.name);
-                            return Err(e);
-                        }
+                    }
+                    // Forward the command to the server
+                    Ok(OptionalCommand::None(packet)) => {
+                        target_conn
+                            .write(ServerboundPacketWrapper::Game(
+                                ServerboundGamePacket::ChatCommand(packet),
+                            ))
+                            .await?;
+                    }
+                    Err(e) => {
+                        error!("Error proxying command for `{}`: {e}", client_profile.name);
+                        return Err(e);
                     }
                 }
-                packet => {
-                    target_conn.write(ClientWrapperPacket::Game(packet)).await?;
-                }
             }
-        }
+            // Forward other packets to the target
+            packet => {
+                target_conn
+                    .write(ServerboundPacketWrapper::Game(packet))
+                    .await?;
+            }
+        },
     }
 
     Ok(None)
@@ -207,31 +209,34 @@ async fn handle_client_packet(
 
 /// Handle packets from the target
 async fn handle_target_packet(
-    packet: TargetWrapperPacket,
+    packet: ClientboundPacketWrapper,
     client_conn: &mut ClientWrapper,
     _target_conn: &mut TargetWrapper,
 ) -> anyhow::Result<Option<ConnType>> {
     match packet {
         // Forward configuration packets from the target to the client
-        TargetWrapperPacket::Configuration(packet) => {
+        ClientboundPacketWrapper::Configuration(packet) => {
             client_conn
-                .write(TargetWrapperPacket::Configuration(packet))
+                .write(ClientboundPacketWrapper::Configuration(packet))
                 .await?;
         }
         // Forward game packets from the target to the client
-        TargetWrapperPacket::Game(packet) => match packet {
+        ClientboundPacketWrapper::Game(packet) => match packet {
             // Change the connection type
             ClientboundGamePacket::StartConfiguration(packet) => {
                 client_conn
-                    .write(TargetWrapperPacket::Game(
+                    .write(ClientboundPacketWrapper::Game(
                         ClientboundGamePacket::StartConfiguration(packet),
                     ))
                     .await?;
 
                 return Ok(Some(ConnType::Configuration));
             }
+            // Forward other packets to the client
             packet => {
-                client_conn.write(TargetWrapperPacket::Game(packet)).await?;
+                client_conn
+                    .write(ClientboundPacketWrapper::Game(packet))
+                    .await?;
             }
         },
     }

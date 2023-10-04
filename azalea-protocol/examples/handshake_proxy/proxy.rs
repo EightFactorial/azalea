@@ -80,7 +80,7 @@ async fn proxy(
 
     // Wait for either of the threads to finish.
     tokio::try_join!(client_to_server, server_to_client)?;
-    info!(target: "handshake_proxy::login", "Player \'{name}\' left the game");
+    info!(target: "handshake_proxy::login", "Player `{name}` left the game");
 
     Ok(())
 }

@@ -95,7 +95,7 @@ async fn handle_client_packet(
     match packet {
         ServerboundLoginPacket::Hello(packet) => {
             info!(
-                "Player \'{0}\' from {1} logging in with uuid: {2}",
+                "Player `{0}` from {1} logging in with uuid: {2}",
                 packet.name,
                 client_addr.ip(),
                 packet.profile_id.to_string()
@@ -135,7 +135,7 @@ async fn handle_client_packet(
                 .write(ServerboundLoginPacket::LoginAcknowledged(packet))
                 .await?;
 
-            info!("Player \'{0}\' has logged in!", profile.name);
+            info!("Player `{0}` has logged in!", profile.name);
 
             return Ok(Some(()));
         }
