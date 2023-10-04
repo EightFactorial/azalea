@@ -8,17 +8,16 @@ use azalea_protocol::{
     },
     read::ReadPacketError,
 };
-use log::{error, info};
+use log::error;
 
 /// Reply with the proxy server information
 pub async fn handle(
     mut conn: Connection<ServerboundStatusPacket, ClientboundStatusPacket>,
     intent: ClientIntentionPacket,
-    client_ip: SocketAddr,
-    target_ip: SocketAddr,
+    target_addr: SocketAddr,
 ) -> anyhow::Result<()> {
     // Connect to the target server
-    let mut target_conn = Connection::new(&target_ip).await?;
+    let mut target_conn = Connection::new(&target_addr).await?;
     target_conn
         .write(ServerboundHandshakePacket::ClientIntention(intent))
         .await?;
@@ -29,20 +28,7 @@ pub async fn handle(
             // Read packets from the client and forward them to the target
             result = conn.read() => {
                 match result {
-                    Ok(ServerboundStatusPacket::StatusRequest(packet)) => {
-                        info!("Forwarding status request from {0}", client_ip.ip());
-
-                        target_conn
-                            .write(ServerboundStatusPacket::StatusRequest(packet))
-                            .await?;
-                    }
-                    Ok(ServerboundStatusPacket::PingRequest(packet)) => {
-                        info!("Forwarding ping request from {0}", client_ip.ip());
-
-                        target_conn
-                            .write(ServerboundStatusPacket::PingRequest(packet))
-                            .await?;
-                    }
+                    Ok(packet) => target_conn.write(packet).await?,
                     Err(e) => match *e {
                         ReadPacketError::ConnectionClosed => {
                             break;
@@ -58,20 +44,7 @@ pub async fn handle(
             // Read packets from the target and forward them to the client
             result = target_conn.read() => {
                 match result {
-                    Ok(ClientboundStatusPacket::StatusResponse(packet)) => {
-                        info!("Got status response for {0}", client_ip.ip());
-
-                        conn
-                            .write(ClientboundStatusPacket::StatusResponse(packet))
-                            .await?;
-                    }
-                    Ok(ClientboundStatusPacket::PongResponse(packet)) => {
-                        info!("Got pong response for {0}", client_ip.ip());
-
-                        conn
-                            .write(ClientboundStatusPacket::PongResponse(packet))
-                            .await?;
-                    }
+                    Ok(packet) => conn.write(packet).await?,
                     Err(e) => match *e {
                         ReadPacketError::ConnectionClosed => {
                             break;

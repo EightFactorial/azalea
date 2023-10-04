@@ -101,7 +101,7 @@ async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     match intent.intention {
         ConnectionProtocol::Status => {
             // Handle the status request
-            status::handle(conn.status(), ip).await?;
+            status::handle(conn.status()).await?;
         }
         ConnectionProtocol::Login => {
             // Handle the login request

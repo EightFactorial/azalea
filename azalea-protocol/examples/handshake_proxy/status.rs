@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use azalea_protocol::{
     connect::Connection,
     packets::status::{
@@ -9,14 +7,13 @@ use azalea_protocol::{
     },
     read::ReadPacketError,
 };
-use log::{error, info};
+use log::error;
 
 use crate::{PROXY_DESC, PROXY_FAVICON, PROXY_PLAYERS, PROXY_SECURE_CHAT, PROXY_VERSION};
 
 /// Reply with the proxy server information
 pub async fn handle(
     mut conn: Connection<ServerboundStatusPacket, ClientboundStatusPacket>,
-    ip: SocketAddr,
 ) -> anyhow::Result<()> {
     loop {
         match conn.read().await {
@@ -33,15 +30,11 @@ pub async fn handle(
                     .get(),
                 )
                 .await?;
-
-                info!("Sent status to {}", ip.ip());
             }
             Ok(ServerboundStatusPacket::PingRequest(packet)) => {
                 // Respond with the same time as the client
                 conn.write(ClientboundPongResponsePacket { time: packet.time }.get())
                     .await?;
-
-                info!("Sent ping to {}", ip.ip());
 
                 // Close the connection
                 break;

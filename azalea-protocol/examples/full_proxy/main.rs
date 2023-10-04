@@ -11,6 +11,7 @@ use log::{error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
+mod login;
 mod status;
 
 // The address and port to listen on
@@ -87,12 +88,11 @@ async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow
     match intent.intention {
         ConnectionProtocol::Status => {
             // Handle the status request
-            status::handle(conn.status(), intent, client_addr, target_addr).await?;
+            status::handle(conn.status(), intent, target_addr).await?;
         }
         ConnectionProtocol::Login => {
             // Handle the login request
-            // login::handle(conn.login(), client_addr, intent).await?;
-            todo!("Handle client login")
+            login::handle(conn.login(), intent, client_addr, target_addr).await?;
         }
         intent => {
             warn!(target: "full_proxy::incoming", "Client provided weird intent: {intent}");
