@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow::Result<()> {
     // Get the ip address of the connecting client
     let Ok(client_addr) = stream.peer_addr() else {
-        error!(target: "full_proxy::incoming", "Failed to get ip address of client");
+        error!(target: "offline_proxy::incoming", "Failed to get ip address of client");
         return Ok(());
     };
 
@@ -72,7 +72,7 @@ async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow
         Ok(ServerboundHandshakePacket::ClientIntention(packet)) => {
             // Log the connection
             info!(
-                target: "full_proxy::incoming",
+                target: "offline_proxy::incoming",
                 "New connection from {0}, Version: {1}, Intent: {2}",
                 client_addr.ip(),
                 packet.protocol_version,
@@ -84,7 +84,7 @@ async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow
         }
         Err(e) => {
             let e = e.into();
-            warn!(target: "full_proxy::incoming", "Error reading client intent: {e}");
+            warn!(target: "offline_proxy::incoming", "Error reading client intent: {e}");
             return Err(e);
         }
     };
@@ -99,7 +99,7 @@ async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow
             states::login(conn.login(), intent, client_addr, target_addr).await?;
         }
         intent => {
-            warn!(target: "full_proxy::incoming", "Client provided weird intent: {intent}");
+            warn!(target: "offline_proxy::incoming", "Client provided weird intent: {intent}");
         }
     }
 
