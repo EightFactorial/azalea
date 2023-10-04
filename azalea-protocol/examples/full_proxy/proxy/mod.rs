@@ -10,7 +10,7 @@ use self::wrapper::{ClientWrapper, ClientWrapperPacket, TargetWrapper, TargetWra
 pub mod wrapper;
 
 /// Proxy packets between the client and target,
-/// fully decoding them in the process
+/// possibly changing the connection type.
 pub async fn proxy(
     mut client_conn: ClientWrapper,
     mut target_conn: TargetWrapper,

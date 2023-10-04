@@ -35,6 +35,7 @@ pub async fn handle(
     // Store the player's profile information
     let mut profile = GameProfile::default();
 
+    // Complete the login process
     loop {
         tokio::select! {
             packet = conn.read() => {
@@ -50,16 +51,15 @@ pub async fn handle(
             packet = target_conn.read() => {
                 match packet {
                     Err(e) => return Err(handle_error(e.into(), &profile)),
-                    Ok(packet) => match handle_target_packet(packet, &mut conn, &mut target_conn, &mut profile).await {
-                        Err(e) => return Err(handle_error(e, &profile)),
-                        Ok(None) => {}
-                        Ok(Some(())) => break,
+                    Ok(packet) => if let Err(e) = handle_target_packet(packet, &mut conn, &mut target_conn, &mut profile).await {
+                        return Err(handle_error(e, &profile));
                     }
                 }
             }
         }
     }
 
+    // Spawn a new thread to proxy packets
     tokio::spawn(proxy::proxy(
         ClientWrapper::Configuration(conn.configuration()),
         TargetWrapper::Configuration(target_conn.configuration()),
@@ -101,6 +101,7 @@ async fn handle_client_packet(
                 packet.profile_id.to_string()
             );
 
+            // Store the player's profile information
             profile.name = packet.name.clone();
             profile.uuid = packet.profile_id;
 
@@ -109,14 +110,25 @@ async fn handle_client_packet(
                 .await?;
         }
         ServerboundLoginPacket::Key(packet) => {
-            let key_bytes = packet.key_bytes.clone();
+            let Ok(key_bytes) = packet.key_bytes.clone().try_into() else {
+                // The key bytes are invalid, disconnect
+                client_conn
+                    .write(ClientboundLoginPacket::LoginDisconnect(
+                        ClientboundLoginDisconnectPacket {
+                            reason: "Invalid login key".into(),
+                        },
+                    ))
+                    .await?;
+
+                return Err(anyhow::anyhow!("Invalid login key"));
+            };
 
             target_conn
-                .write(ServerboundLoginPacket::Key(packet.clone()))
+                .write(ServerboundLoginPacket::Key(packet))
                 .await?;
 
-            client_conn.set_encryption_key(key_bytes.clone().try_into().unwrap());
-            target_conn.set_encryption_key(key_bytes.try_into().unwrap());
+            client_conn.set_encryption_key(key_bytes);
+            target_conn.set_encryption_key(key_bytes);
         }
         ServerboundLoginPacket::LoginAcknowledged(packet) => {
             target_conn
@@ -136,18 +148,15 @@ async fn handle_client_packet(
 }
 
 /// Handle a packet from the target
-///
-/// Returns `Ok(Some(()))` if the login process is complete
 async fn handle_target_packet(
     packet: ClientboundLoginPacket,
     client_conn: &mut Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
     target_conn: &mut Connection<ClientboundLoginPacket, ServerboundLoginPacket>,
     profile: &mut GameProfile,
-) -> anyhow::Result<Option<()>> {
-    info!("Packet from target: {:?}", packet);
-
+) -> anyhow::Result<()> {
     match packet {
         ClientboundLoginPacket::Hello(_) => {
+            // The proxy does not support online servers, disconnect
             client_conn
                 .write(ClientboundLoginPacket::LoginDisconnect(
                     ClientboundLoginDisconnectPacket {
@@ -159,22 +168,28 @@ async fn handle_target_packet(
             return Err(anyhow::anyhow!("Proxy does not support online servers"));
         }
         ClientboundLoginPacket::LoginDisconnect(packet) => {
+            let reason = packet.reason.clone().to_ansi();
+
             client_conn
-                .write(ClientboundLoginPacket::LoginDisconnect(packet.clone()))
+                .write(ClientboundLoginPacket::LoginDisconnect(packet))
                 .await?;
 
-            return Err(anyhow::anyhow!(packet.reason.to_string()));
+            // Log the reason for the disconnect
+            return Err(anyhow::anyhow!(reason));
         }
         ClientboundLoginPacket::LoginCompression(packet) => {
             let threshold = packet.compression_threshold;
-            target_conn.set_compression_threshold(threshold);
 
             client_conn
                 .write(ClientboundLoginPacket::LoginCompression(packet))
                 .await?;
+
+            // Set the compression threshold for the connections
+            target_conn.set_compression_threshold(threshold);
             client_conn.set_compression_threshold(threshold);
         }
         ClientboundLoginPacket::GameProfile(packet) => {
+            // Overwrite the player's profile information with what the server sent
             *profile = packet.game_profile.clone();
 
             client_conn
@@ -186,5 +201,5 @@ async fn handle_target_packet(
         }
     }
 
-    Ok(None)
+    Ok(())
 }

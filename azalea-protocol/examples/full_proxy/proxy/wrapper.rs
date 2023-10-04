@@ -7,14 +7,14 @@ use azalea_protocol::{
     read::ReadPacketError,
 };
 
-/// A wrapper around a connection that allows for switching between the
-/// configuration and game
+/// A wrapper around a client connection that can
+/// switch between the configuration and game states
 pub enum ClientWrapper {
     Configuration(Connection<ServerboundConfigurationPacket, ClientboundConfigurationPacket>),
     Game(Connection<ServerboundGamePacket, ClientboundGamePacket>),
 }
 
-/// An enum containing the two types of connection packets
+/// An enum containing the two types of client packets
 #[derive(Debug)]
 pub enum ClientWrapperPacket {
     Configuration(ServerboundConfigurationPacket),
@@ -22,6 +22,7 @@ pub enum ClientWrapperPacket {
 }
 
 impl ClientWrapper {
+    /// Switch to the game state
     pub fn game(self) -> Self {
         match self {
             ClientWrapper::Configuration(conn) => ClientWrapper::Game(Connection::from(conn)),
@@ -29,6 +30,7 @@ impl ClientWrapper {
         }
     }
 
+    /// Switch to the configuration state
     pub fn configuration(self) -> Self {
         match self {
             ClientWrapper::Game(conn) => ClientWrapper::Configuration(Connection::from(conn)),
@@ -36,6 +38,7 @@ impl ClientWrapper {
         }
     }
 
+    /// Read a packet from the client
     pub async fn read(&mut self) -> Result<ClientWrapperPacket, Box<ReadPacketError>> {
         match self {
             ClientWrapper::Configuration(conn) => {
@@ -45,6 +48,7 @@ impl ClientWrapper {
         }
     }
 
+    /// Write a packet to the client
     pub async fn write(&mut self, packet: TargetWrapperPacket) -> std::io::Result<()> {
         match self {
             ClientWrapper::Configuration(conn) => match packet {
@@ -69,14 +73,14 @@ impl ClientWrapper {
     }
 }
 
-/// A wrapper around a connection that allows for switching between the
-/// configuration and game
+/// A wrapper around a target connection that can
+/// switch between the configuration and game states
 pub enum TargetWrapper {
     Configuration(Connection<ClientboundConfigurationPacket, ServerboundConfigurationPacket>),
     Game(Connection<ClientboundGamePacket, ServerboundGamePacket>),
 }
 
-/// An enum containing the two types of connection packets
+/// An enum containing the two types of target packets
 #[derive(Debug)]
 pub enum TargetWrapperPacket {
     Configuration(ClientboundConfigurationPacket),
@@ -84,6 +88,7 @@ pub enum TargetWrapperPacket {
 }
 
 impl TargetWrapper {
+    /// Switch to the game state
     pub fn game(self) -> Self {
         match self {
             TargetWrapper::Configuration(conn) => TargetWrapper::Game(Connection::from(conn)),
@@ -91,6 +96,7 @@ impl TargetWrapper {
         }
     }
 
+    /// Switch to the configuration state
     pub fn configuration(self) -> Self {
         match self {
             TargetWrapper::Game(conn) => TargetWrapper::Configuration(Connection::from(conn)),
@@ -98,6 +104,7 @@ impl TargetWrapper {
         }
     }
 
+    /// Read a packet from the target server
     pub async fn read(&mut self) -> Result<TargetWrapperPacket, Box<ReadPacketError>> {
         match self {
             TargetWrapper::Configuration(conn) => {
@@ -107,6 +114,7 @@ impl TargetWrapper {
         }
     }
 
+    /// Write a packet to the target server
     pub async fn write(&mut self, packet: ClientWrapperPacket) -> std::io::Result<()> {
         match self {
             TargetWrapper::Configuration(conn) => match packet {
