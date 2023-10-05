@@ -8,6 +8,7 @@ use azalea_protocol::{
     },
     read::ReadPacketError,
 };
+use futures_util::FutureExt;
 use log::{error, info, warn};
 
 use crate::proxy;
@@ -23,6 +24,7 @@ pub async fn handle(
 ) -> anyhow::Result<()> {
     loop {
         match conn.read().await {
+            // This should be the first packet sent by the client
             Ok(ServerboundLoginPacket::Hello(packet)) => {
                 info!(
                     "Player `{0}` from {1} logging in with uuid: {2}",
@@ -31,17 +33,32 @@ pub async fn handle(
                     packet.profile_id.to_string()
                 );
 
-                // Forward the connection to the proxy target
-                proxy::spawn(conn, target_addr, intent, packet);
+                // Unwrap the connection
+                let inbound = match conn.unwrap() {
+                    Ok(inbound) => inbound,
+                    Err(e) => {
+                        error!("Failed to unwrap connection: {e}");
+                        return Err(e.into());
+                    }
+                };
 
-                break;
+                // Spawn a task to handle the proxy connection
+                tokio::spawn(
+                    proxy::proxy(inbound, target_addr, intent, packet).map(|result| {
+                        if let Err(e) = result {
+                            error!("Failed to proxy: {e}");
+                        }
+                    }),
+                );
+
+                return Ok(());
             }
             Ok(_) => {
                 warn!("Client sent unexpected packet during login!");
             }
             Err(e) => match *e {
                 ReadPacketError::ConnectionClosed => {
-                    break;
+                    return Ok(());
                 }
 
                 e => {
@@ -51,6 +68,4 @@ pub async fn handle(
             },
         }
     }
-
-    Ok(())
 }

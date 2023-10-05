@@ -5,45 +5,20 @@ use azalea_protocol::{
             client_intention_packet::ClientIntentionPacket, ClientboundHandshakePacket,
             ServerboundHandshakePacket,
         },
-        login::{
-            serverbound_hello_packet::ServerboundHelloPacket, ClientboundLoginPacket,
-            ServerboundLoginPacket,
-        },
+        login::serverbound_hello_packet::ServerboundHelloPacket,
     },
 };
-use futures::FutureExt;
-use log::{error, info};
+use log::info;
 use std::{error::Error, net::SocketAddr};
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpStream,
 };
 
-/// Turn the incoming connection into a [TcpStream]
-/// and spawn a new thread
-#[inline]
-pub fn spawn(
-    conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
-    target_addr: SocketAddr,
-    intent: ClientIntentionPacket,
-    hello: ServerboundHelloPacket,
-) {
-    let Ok(inbound) = conn.unwrap() else {
-        error!("Failed to unwrap connection");
-        return;
-    };
-
-    tokio::spawn(proxy(inbound, target_addr, intent, hello).map(|result| {
-        if let Err(e) = result {
-            error!("Failed to proxy: {e}");
-        }
-    }));
-}
-
 /// Create a connection to the proxy target,
 /// repeat the packets recieved earlier, and
 /// forward data from the connection to the proxy target.
-async fn proxy(
+pub async fn proxy(
     mut inbound: TcpStream,
     target_addr: SocketAddr,
     intent: ClientIntentionPacket,
