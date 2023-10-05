@@ -8,35 +8,32 @@ use crate::{
 
 use super::{default_is_reached, Edge, ExecuteCtx, IsReachedCtx, MoveData, PathfinderCtx};
 
-pub fn parkour_move(ctx: &PathfinderCtx, node: BlockPos) -> Vec<Edge> {
-    let mut edges = Vec::new();
-    edges.extend(parkour_forward_1_move(ctx, node));
-    edges.extend(parkour_headhitter_forward_1_move(ctx, node));
-    edges.extend(parkour_forward_2_move(ctx, node));
-    edges
+pub fn parkour_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, node: BlockPos) {
+    parkour_forward_1_move(edges, ctx, node);
+    parkour_headhitter_forward_1_move(edges, ctx, node);
+    parkour_forward_2_move(edges, ctx, node);
 }
 
-fn parkour_forward_1_move(ctx: &PathfinderCtx, pos: BlockPos) -> Vec<Edge> {
-    let mut edges = Vec::new();
+fn parkour_forward_1_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let gap_offset = BlockPos::new(dir.x(), 0, dir.z());
         let offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
 
         // make sure we actually have to jump
-        if ctx.is_block_solid(&(pos + gap_offset).down(1)) {
+        if ctx.is_block_solid((pos + gap_offset).down(1)) {
             continue;
         }
-        if !ctx.is_standable(&(pos + offset)) {
+        if !ctx.is_standable(pos + offset) {
             continue;
         }
-        if !ctx.is_passable(&(pos + gap_offset)) {
+        if !ctx.is_passable(pos + gap_offset) {
             continue;
         }
-        if !ctx.is_block_passable(&(pos + gap_offset).up(2)) {
+        if !ctx.is_block_passable((pos + gap_offset).up(2)) {
             continue;
         }
         // make sure it's not a headhitter
-        if !ctx.is_block_passable(&pos.up(2)) {
+        if !ctx.is_block_passable(pos.up(2)) {
             continue;
         }
 
@@ -53,41 +50,38 @@ fn parkour_forward_1_move(ctx: &PathfinderCtx, pos: BlockPos) -> Vec<Edge> {
             cost,
         })
     }
-
-    edges
 }
 
-fn parkour_forward_2_move(ctx: &PathfinderCtx, pos: BlockPos) -> Vec<Edge> {
-    let mut edges = Vec::new();
+fn parkour_forward_2_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let gap_1_offset = BlockPos::new(dir.x(), 0, dir.z());
         let gap_2_offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
         let offset = BlockPos::new(dir.x() * 3, 0, dir.z() * 3);
 
         // make sure we actually have to jump
-        if ctx.is_block_solid(&(pos + gap_1_offset).down(1))
-            || ctx.is_block_solid(&(pos + gap_2_offset).down(1))
+        if ctx.is_block_solid((pos + gap_1_offset).down(1))
+            || ctx.is_block_solid((pos + gap_2_offset).down(1))
         {
             continue;
         }
 
-        if !ctx.is_standable(&(pos + offset)) {
+        if !ctx.is_standable(pos + offset) {
             continue;
         }
-        if !ctx.is_passable(&(pos + gap_1_offset)) {
+        if !ctx.is_passable(pos + gap_1_offset) {
             continue;
         }
-        if !ctx.is_block_passable(&(pos + gap_1_offset).up(2)) {
+        if !ctx.is_block_passable((pos + gap_1_offset).up(2)) {
             continue;
         }
-        if !ctx.is_passable(&(pos + gap_2_offset)) {
+        if !ctx.is_passable(pos + gap_2_offset) {
             continue;
         }
-        if !ctx.is_block_passable(&(pos + gap_2_offset).up(2)) {
+        if !ctx.is_block_passable((pos + gap_2_offset).up(2)) {
             continue;
         }
         // make sure it's not a headhitter
-        if !ctx.is_block_passable(&pos.up(2)) {
+        if !ctx.is_block_passable(pos.up(2)) {
             continue;
         }
 
@@ -104,31 +98,28 @@ fn parkour_forward_2_move(ctx: &PathfinderCtx, pos: BlockPos) -> Vec<Edge> {
             cost,
         })
     }
-
-    edges
 }
 
-fn parkour_headhitter_forward_1_move(ctx: &PathfinderCtx, pos: BlockPos) -> Vec<Edge> {
-    let mut edges = Vec::new();
+fn parkour_headhitter_forward_1_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let gap_offset = BlockPos::new(dir.x(), 0, dir.z());
         let offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
 
         // make sure we actually have to jump
-        if ctx.is_block_solid(&(pos + gap_offset).down(1)) {
+        if ctx.is_block_solid((pos + gap_offset).down(1)) {
             continue;
         }
-        if !ctx.is_standable(&(pos + offset)) {
+        if !ctx.is_standable(pos + offset) {
             continue;
         }
-        if !ctx.is_passable(&(pos + gap_offset)) {
+        if !ctx.is_passable(pos + gap_offset) {
             continue;
         }
-        if !ctx.is_block_passable(&(pos + gap_offset).up(2)) {
+        if !ctx.is_block_passable((pos + gap_offset).up(2)) {
             continue;
         }
         // make sure it is a headhitter
-        if !ctx.is_block_solid(&pos.up(2)) {
+        if !ctx.is_block_solid(pos.up(2)) {
             continue;
         }
 
@@ -145,8 +136,6 @@ fn parkour_headhitter_forward_1_move(ctx: &PathfinderCtx, pos: BlockPos) -> Vec<
             cost,
         })
     }
-
-    edges
 }
 
 fn execute_parkour_move(

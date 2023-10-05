@@ -1,4 +1,4 @@
-use std::{hint::black_box, time::Duration};
+use std::{hint::black_box, sync::Arc, time::Duration};
 
 use azalea::{
     pathfinder::{
@@ -12,6 +12,7 @@ use azalea::{
 use azalea_core::position::{ChunkBlockPos, ChunkPos};
 use azalea_world::{Chunk, ChunkStorage, PartialChunkStorage};
 use criterion::{criterion_group, criterion_main, Criterion};
+use parking_lot::RwLock;
 use rand::Rng;
 
 fn generate_bedrock_world(
@@ -78,10 +79,14 @@ fn bench_pathfinder(c: &mut Criterion) {
 
         b.iter(|| {
             let (world, start, end) = generate_bedrock_world(&mut partial_chunks, 4);
-            let ctx = PathfinderCtx::new(&world);
+            let ctx = PathfinderCtx::new(Arc::new(RwLock::new(world.into())));
             let goal = BlockPosGoal(end);
 
-            let successors = |pos: BlockPos| successors_fn(&ctx, pos);
+            let successors = |pos: BlockPos| {
+                let mut edges = Vec::with_capacity(16);
+                successors_fn(&mut edges, &ctx, pos);
+                edges
+            };
 
             let astar::Path { movements, partial } = a_star(
                 start,

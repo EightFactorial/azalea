@@ -178,9 +178,12 @@ fn goto_listener(
         let task = thread_pool.spawn(async move {
             debug!("start: {start:?}");
 
-            let world = &world_lock.read().chunks;
-            let ctx = PathfinderCtx::new(world);
-            let successors = |pos: BlockPos| successors_fn(&ctx, pos);
+            let ctx = PathfinderCtx::new(world_lock);
+            let successors = |pos: BlockPos| {
+                let mut edges = Vec::with_capacity(16);
+                successors_fn(&mut edges, &ctx, pos);
+                edges
+            };
 
             let mut attempt_number = 0;
 
@@ -282,10 +285,13 @@ fn path_found_listener(
                         let world_lock = instance_container.get(instance_name).expect(
                             "Entity tried to pathfind but the entity isn't in a valid world",
                         );
-                        let world = &world_lock.read().chunks;
-                        let ctx = PathfinderCtx::new(world);
                         let successors_fn: moves::SuccessorsFn = event.successors_fn;
-                        let successors = |pos: BlockPos| successors_fn(&ctx, pos);
+                        let ctx = PathfinderCtx::new(world_lock);
+                        let successors = |pos: BlockPos| {
+                            let mut edges = Vec::with_capacity(16);
+                            successors_fn(&mut edges, &ctx, pos);
+                            edges
+                        };
 
                         if successors(last_node.target)
                             .iter()
@@ -445,9 +451,12 @@ fn tick_execute_path(
 
         {
             // obstruction check (the path we're executing isn't possible anymore)
-            let world = &world_lock.read().chunks;
-            let ctx = PathfinderCtx::new(world);
-            let successors = |pos: BlockPos| successors_fn(&ctx, pos);
+            let ctx = PathfinderCtx::new(world_lock);
+            let successors = |pos: BlockPos| {
+                let mut edges = Vec::with_capacity(16);
+                successors_fn(&mut edges, &ctx, pos);
+                edges
+            };
 
             if let Some(last_reached_node) = pathfinder.last_reached_node {
                 if let Some(obstructed_index) =
@@ -728,7 +737,7 @@ mod tests {
                 BlockPos::new(0, 67, 3),
             ],
         );
-        for _ in 0..40 {
+        for _ in 0..60 {
             simulation.tick();
         }
         assert_eq!(

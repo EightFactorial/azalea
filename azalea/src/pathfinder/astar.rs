@@ -1,13 +1,13 @@
 use std::{
     cmp::Reverse,
-    collections::HashMap,
     fmt::Debug,
     hash::Hash,
     time::{Duration, Instant},
 };
 
-use log::{trace, warn};
+use log::{debug, trace, warn};
 use priority_queue::PriorityQueue;
+use rustc_hash::FxHashMap;
 
 pub struct Path<P, M>
 where
@@ -40,7 +40,7 @@ where
 
     let mut open_set = PriorityQueue::new();
     open_set.push(start, Reverse(Weight(0.)));
-    let mut nodes: HashMap<P, Node<P, M>> = HashMap::new();
+    let mut nodes: FxHashMap<P, Node<P, M>> = FxHashMap::default();
     nodes.insert(
         start,
         Node {
@@ -55,8 +55,12 @@ where
     let mut best_paths: [P; 7] = [start; 7];
     let mut best_path_scores: [f32; 7] = [heuristic(start); 7];
 
+    let mut num_nodes = 0;
+
     while let Some((current_node, _)) = open_set.pop() {
+        num_nodes += 1;
         if success(current_node) {
+            debug!("Nodes considered: {num_nodes}");
             return Path {
                 movements: reconstruct_path(nodes, current_node),
                 partial: false,
@@ -99,7 +103,8 @@ where
             }
         }
 
-        if start_time.elapsed() > timeout {
+        // check for timeout every ~1ms
+        if num_nodes % 1000 == 0 && start_time.elapsed() > timeout {
             // timeout, just return the best path we have so far
             trace!("A* couldn't find a path in time, returning best path");
             break;
@@ -129,7 +134,7 @@ where
     best_paths[0]
 }
 
-fn reconstruct_path<P, M>(mut nodes: HashMap<P, Node<P, M>>, current: P) -> Vec<Movement<P, M>>
+fn reconstruct_path<P, M>(mut nodes: FxHashMap<P, Node<P, M>>, current: P) -> Vec<Movement<P, M>>
 where
     P: Eq + Hash + Copy + Debug,
 {
