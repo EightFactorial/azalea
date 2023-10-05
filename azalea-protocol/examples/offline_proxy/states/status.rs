@@ -11,7 +11,7 @@ use azalea_protocol::{
 use log::error;
 
 /// Reply with the proxy server information
-pub async fn handle(
+pub async fn status(
     mut conn: Connection<ServerboundStatusPacket, ClientboundStatusPacket>,
     intent: ClientIntentionPacket,
     target_addr: SocketAddr,

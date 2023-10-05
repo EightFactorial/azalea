@@ -19,7 +19,7 @@ use crate::proxy::{
 };
 
 /// Reply with the proxy server information
-pub async fn handle(
+pub async fn login(
     mut conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
     intent: ClientIntentionPacket,
     client_addr: SocketAddr,
@@ -67,19 +67,6 @@ pub async fn handle(
     ));
 
     Ok(())
-}
-
-/// Handle an error during login
-#[inline]
-fn handle_error(e: anyhow::Error, profile: &GameProfile) -> anyhow::Error {
-    let name = if profile.name.is_empty() {
-        "client".to_string()
-    } else {
-        format!("`{}`", profile.name)
-    };
-    error!("Error during login for {name}: {e}");
-
-    e
 }
 
 /// Handle a packet from the client
@@ -202,4 +189,17 @@ async fn handle_target_packet(
     }
 
     Ok(())
+}
+
+/// Handle an error during login
+#[inline]
+fn handle_error(e: anyhow::Error, profile: &GameProfile) -> anyhow::Error {
+    let name = if profile.name.is_empty() {
+        "client".to_string()
+    } else {
+        format!("`{}`", profile.name)
+    };
+    error!("Error during login for {name}: {e}");
+
+    e
 }

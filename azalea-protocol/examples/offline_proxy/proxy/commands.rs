@@ -1,6 +1,6 @@
 use azalea_protocol::packets::game::serverbound_chat_command_packet::ServerboundChatCommandPacket;
 
-/// An enum containing either a command or a packet
+/// An enum containing either a command or a command packet
 #[derive(Debug, Clone)]
 pub enum OptionalCommand {
     Some(Command),
@@ -14,19 +14,21 @@ pub enum Command {
     Echo(String),
 }
 
-/// Optionally parse a proxy command from a chat command packet
-pub fn parse_command(packet: ServerboundChatCommandPacket) -> anyhow::Result<OptionalCommand> {
-    let mut iter = packet.command.split_whitespace();
+impl OptionalCommand {
+    /// Attempt to parse a proxy command from a chat command packet
+    pub fn parse_packet(packet: ServerboundChatCommandPacket) -> OptionalCommand {
+        let mut iter = packet.command.split_whitespace();
 
-    match iter.next() {
-        Some("proxy::disconnect") => {
-            let reason = iter.collect::<Vec<&str>>().join(" ");
-            Ok(OptionalCommand::Some(Command::Disconnect(reason)))
+        match iter.next() {
+            Some("proxy::disconnect") => {
+                let reason = iter.collect::<Vec<&str>>().join(" ");
+                OptionalCommand::Some(Command::Disconnect(reason))
+            }
+            Some("proxy::echo") => {
+                let message = iter.collect::<Vec<&str>>().join(" ");
+                OptionalCommand::Some(Command::Echo(message))
+            }
+            None | Some(_) => OptionalCommand::None(packet),
         }
-        Some("proxy::echo") => {
-            let message = iter.collect::<Vec<&str>>().join(" ");
-            Ok(OptionalCommand::Some(Command::Echo(message)))
-        }
-        None | Some(_) => Ok(OptionalCommand::None(packet)),
     }
 }
