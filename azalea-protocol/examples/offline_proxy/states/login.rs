@@ -82,10 +82,9 @@ async fn handle_client_packet(
     match packet {
         ServerboundLoginPacket::Hello(packet) => {
             info!(
-                "Player `{0}` from {1} logging in with uuid: {2}",
+                "Player `{0}` logging in from {1}",
                 packet.name,
                 client_addr.ip(),
-                packet.profile_id.to_string()
             );
 
             // Store the player's profile information

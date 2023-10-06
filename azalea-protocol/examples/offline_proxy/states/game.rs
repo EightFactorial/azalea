@@ -52,10 +52,12 @@ pub async fn game_client_to_target(
             match OptionalCommand::parse_packet(packet) {
                 // Handle proxy command
                 OptionalCommand::Some(command) => {
-                    info!(
-                        "Player `{}` executed proxy command: {command:?}",
-                        client_profile.name
-                    );
+                    if !matches!(command, Command::Error(_)) {
+                        info!(
+                            "Player `{}` executed proxy command: {command}",
+                            client_profile.name
+                        );
+                    }
 
                     match command {
                         // Send a disconnect packet to the client
@@ -77,6 +79,21 @@ pub async fn game_client_to_target(
                                     ClientboundGamePacket::SystemChat(
                                         ClientboundSystemChatPacket {
                                             content: message.into(),
+                                            overlay: false,
+                                        },
+                                    ),
+                                ))
+                                .await?;
+                        }
+                        // Print a command's static message
+                        Command::Error(content)
+                        | Command::Help(content)
+                        | Command::About(content) => {
+                            client_conn
+                                .write(ClientboundPacketWrapper::Game(
+                                    ClientboundGamePacket::SystemChat(
+                                        ClientboundSystemChatPacket {
+                                            content: content.to_string().into(),
                                             overlay: false,
                                         },
                                     ),

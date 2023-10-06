@@ -12,7 +12,7 @@ use log::error;
 use crate::{PROXY_DESC, PROXY_FAVICON, PROXY_PLAYERS, PROXY_SECURE_CHAT, PROXY_VERSION};
 
 /// Reply with the proxy server information
-pub async fn handle(
+pub async fn status(
     mut conn: Connection<ServerboundStatusPacket, ClientboundStatusPacket>,
 ) -> anyhow::Result<()> {
     loop {

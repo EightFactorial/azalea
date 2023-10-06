@@ -1,5 +1,8 @@
 use azalea_auth::game_profile::GameProfile;
-use azalea_protocol::packets::configuration::serverbound_client_information_packet::ClientInformation;
+use azalea_protocol::{
+    packets::configuration::serverbound_client_information_packet::ClientInformation,
+    read::ReadPacketError,
+};
 use log::error;
 
 use wrapper::{ClientWrapper, ClientboundPacketWrapper, ServerboundPacketWrapper, TargetWrapper};
@@ -31,7 +34,10 @@ pub async fn proxy(
         tokio::select! {
             packet = client_conn.read() => match packet {
                 Err(e) => {
-                    error!("Error proxying c2s packets for `{}`: {e}", client_profile.name);
+                    if !matches!(*e, ReadPacketError::ConnectionClosed) {
+                        error!("Error proxying C2S packets for `{}`: {e}", client_profile.name);
+                    }
+
                     return Err(e.into());
                 },
                 Ok(packet) => match match packet {
@@ -74,7 +80,10 @@ pub async fn proxy(
             },
             packet = target_conn.read() => match packet {
                 Err(e) => {
-                    error!("Error proxying s2c packets for `{}`: {e}", client_profile.name);
+                    if !matches!(*e, ReadPacketError::ConnectionClosed) {
+                        error!("Error proxying S2C packets for `{}`: {e}", client_profile.name);
+                    }
+
                     return Err(e.into());
                 },
                 Ok(packet) => match match packet {

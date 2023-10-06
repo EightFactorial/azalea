@@ -1,5 +1,5 @@
 mod login;
-pub use login::handle as login;
+pub use login::login;
 
 mod status;
-pub use status::handle as status;
+pub use status::status;

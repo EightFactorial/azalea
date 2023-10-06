@@ -16,7 +16,7 @@ use crate::proxy;
 /// Wait for the client to send the `Hello` packet,
 /// log their username and uuid, and then forward the
 /// connection along to the proxy target.
-pub async fn handle(
+pub async fn login(
     mut conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
     client_addr: SocketAddr,
     target_addr: SocketAddr,
@@ -27,10 +27,10 @@ pub async fn handle(
             // This should be the first packet sent by the client
             Ok(ServerboundLoginPacket::Hello(packet)) => {
                 info!(
-                    "Player `{0}` from {1} logging in with uuid: {2}",
+                    "Player `{0}` ({1}) logging in from {2}",
                     packet.name,
-                    client_addr.ip(),
-                    packet.profile_id.to_string()
+                    packet.profile_id.to_string(),
+                    client_addr.ip()
                 );
 
                 // Unwrap the connection
@@ -62,7 +62,7 @@ pub async fn handle(
                 }
 
                 e => {
-                    error!("Error reading clinet login packets: {e}");
+                    error!("Error reading client login packets: {e}");
                     return Err(e.into());
                 }
             },
