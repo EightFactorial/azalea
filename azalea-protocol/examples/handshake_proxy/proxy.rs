@@ -7,9 +7,10 @@ use azalea_protocol::{
         },
         login::serverbound_hello_packet::ServerboundHelloPacket,
     },
+    resolver, ServerAddress,
 };
 use log::info;
-use std::{error::Error, net::SocketAddr};
+use std::error::Error;
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpStream,
@@ -20,11 +21,16 @@ use tokio::{
 /// forward data from the connection to the proxy target.
 pub async fn proxy(
     mut inbound: TcpStream,
-    target_addr: SocketAddr,
-    intent: ClientIntentionPacket,
+    mut intent: ClientIntentionPacket,
     hello: ServerboundHelloPacket,
+    target_addr: ServerAddress,
 ) -> Result<(), Box<dyn Error>> {
-    let outbound = TcpStream::connect(target_addr).await?;
+    // Resolve and modify intent for target
+    let resolved_address = resolver::resolve_address(&target_addr).await?;
+    intent.hostname = target_addr.host.clone();
+    intent.port = target_addr.port;
+
+    let outbound = TcpStream::connect(resolved_address).await?;
     let name = hello.name.clone();
     outbound.set_nodelay(true)?;
 

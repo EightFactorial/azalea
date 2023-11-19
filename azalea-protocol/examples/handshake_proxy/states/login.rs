@@ -7,6 +7,7 @@ use azalea_protocol::{
         login::{ClientboundLoginPacket, ServerboundLoginPacket},
     },
     read::ReadPacketError,
+    ServerAddress,
 };
 use futures_util::FutureExt;
 use log::{error, info, warn};
@@ -19,7 +20,7 @@ use crate::proxy;
 pub async fn login(
     mut conn: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
     client_addr: SocketAddr,
-    target_addr: SocketAddr,
+    target_addr: ServerAddress,
     intent: ClientIntentionPacket,
 ) -> anyhow::Result<()> {
     loop {
@@ -44,7 +45,7 @@ pub async fn login(
 
                 // Spawn a task to handle the proxy connection
                 tokio::spawn(
-                    proxy::proxy(inbound, target_addr, intent, packet).map(|result| {
+                    proxy::proxy(inbound, intent, packet, target_addr).map(|result| {
                         if let Err(e) = result {
                             error!("Failed to proxy: {e}");
                         }
