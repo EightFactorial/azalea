@@ -334,7 +334,7 @@ async fn handle(mut bot: Client, event: Event, _state: State) -> anyhow::Result<
                             let chunk_pos = local_chunk_storage.chunk_pos_from_index(i);
                             println!(
                                 "{chunk_pos:?} has {} references",
-                                std::sync::Arc::strong_count(&chunk)
+                                std::sync::Arc::strong_count(chunk)
                             );
                             local_loaded_chunks_count += 1;
                         }

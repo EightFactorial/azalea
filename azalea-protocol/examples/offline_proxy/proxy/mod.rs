@@ -3,7 +3,7 @@ use azalea_protocol::{
     packets::configuration::serverbound_client_information_packet::ClientInformation,
     read::ReadPacketError,
 };
-use log::error;
+use tracing::error;
 
 use wrapper::{ClientWrapper, ClientboundPacketWrapper, ServerboundPacketWrapper, TargetWrapper};
 

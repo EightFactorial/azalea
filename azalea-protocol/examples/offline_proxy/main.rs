@@ -11,9 +11,9 @@ use azalea_protocol::{
         ConnectionProtocol,
     },
 };
-use log::{error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
+use tracing::{error, info, warn};
 
 mod proxy;
 mod states;

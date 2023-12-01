@@ -11,7 +11,7 @@ use azalea_protocol::{
         },
     },
 };
-use log::{error, info};
+use tracing::{error, info};
 
 use crate::proxy::{
     self,

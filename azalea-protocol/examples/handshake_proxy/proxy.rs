@@ -8,12 +8,12 @@ use azalea_protocol::{
         login::serverbound_hello_packet::ServerboundHelloPacket,
     },
 };
-use log::info;
 use std::{error::Error, net::SocketAddr};
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpStream,
 };
+use tracing::info;
 
 /// Create a connection to the proxy target,
 /// repeat the packets recieved earlier, and
