@@ -1,9 +1,7 @@
 Azalea is a framework for creating Minecraft bots.
 
-Internally, it's just a wrapper over [`azalea_client`], adding useful
-functions for making bots. Because of this, lots of the documentation will
-refer to `azalea_client`. You can just replace these with `azalea` in your
-code, since everything from azalea_client is re-exported in azalea.
+This page is primarily meant for developers that already know they want to use Azalea.
+See the [readme](https://github.com/azalea-rs/azalea) for an overview of why you might want to use it.
 
 # Installation
 
@@ -12,16 +10,14 @@ default nightly`.
 
 Then, add one of the following lines to your Cargo.toml:
 
-Latest bleeding-edge version (recommended):
-`azalea = { git="https://github.com/mat-1/azalea" }`\
-Latest "stable" release:
-`azalea = "0.8.0"`
+- Latest bleeding-edge version (recommended): `azalea = { git="https://github.com/azalea-rs/azalea" }`\
+- Latest "stable" release: `azalea = "0.8.0"`
 
 ## Optimization
 
 For faster compile times, make a `.cargo/config.toml` file in your project
 and copy
-[this file](https://github.com/mat-1/azalea/blob/main/.cargo/config.toml)
+[this file](https://github.com/azalea-rs/azalea/blob/main/.cargo/config.toml)
 into it. You may have to install the LLD linker.
 
 For faster performance in debug mode, add the following code to your
@@ -32,6 +28,14 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 ```
+# Documentation
+
+The documentation for the latest Azalea crates.io release is available at [docs.rs/azalea](https://docs.rs/azalea/latest/azalea/) and the docs for the latest bleeding-edge (git) version are at [azalea.matdoes.dev](https://azalea.matdoes.dev/azalea/).
+
+Note that the `azalea` crate is technically just a wrapper over [`azalea_client`] that adds some extra functions.
+Because of this, some of the documentation will refer to `azalea_client`.
+You can just replace these with `azalea` in your code since everything from `azalea_client` is re-exported in azalea.
+
 
 # Examples
 
@@ -73,11 +77,11 @@ async fn handle(bot: Client, event: Event, state: State) -> anyhow::Result<()> {
 
 # Swarms
 
-Azalea lets you create "swarms", which are a group of bots in the same world that can perform actions together. See [testbot](https://github.com/mat-1/azalea/blob/main/azalea/examples/testbot.rs) for an example. Also, if you're using swarms, you should also have both `azalea::prelude::*` and `azalea::swarm::prelude::*`.
+Azalea lets you create "swarms", which are a group of bots in the same world that can perform actions together. See [testbot](https://github.com/azalea-rs/azalea/blob/main/azalea/examples/testbot.rs) for an example. Also, if you're using swarms, you should also `use` both `azalea::prelude::*` and `azalea::swarm::prelude::*`.
 
 # Plugins
 
-Azalea uses [Bevy ECS](https://docs.rs/bevy_ecs) internally to store information about the world and clients. Bevy plugins are more powerful than async handler functions, but more difficult to use. See [pathfinder](https://github.com/mat-1/azalea/blob/main/azalea/src/pathfinder/mod.rs) as an example of how to make a plugin. You can then enable a plugin by adding `.add_plugin(ExamplePlugin)` in your client/swarm builder.
+Azalea uses [Bevy ECS](https://docs.rs/bevy_ecs) internally to store information about the world and clients. Bevy plugins are more powerful than async handler functions, but more difficult to use. See [pathfinder](https://github.com/azalea-rs/azalea/blob/main/azalea/src/pathfinder/mod.rs) as an example of how to make a plugin. You can then enable a plugin by adding `.add_plugin(ExamplePlugin)` in your client/swarm builder.
 
 Also note that just because something is an entity in the ECS doesn't mean that it's a Minecraft entity. You can filter for that by having `With<MinecraftEntityId>` as a filter.
 
@@ -97,7 +101,7 @@ Note: If you get a `SetLoggerError`, it's because you have multiple loggers. Aza
 
 ## Deadlocks
 
-If your code is simply hanging, it might be a deadlock. Copy the deadlock block in [`azalea/examples/testbot.rs`](https://github.com/mat-1/azalea/blob/main/azalea/examples/testbot.rs) to the beginning of your code and it'll print a long backtrace if a deadlock is detected.
+If your code is simply hanging, it might be a deadlock. Copy the deadlock block in [`azalea/examples/testbot.rs`](https://github.com/azalea-rs/azalea/blob/main/azalea/examples/testbot.rs) to the beginning of your code and it'll print a long backtrace if a deadlock is detected.
 
 ## Backtraces
 

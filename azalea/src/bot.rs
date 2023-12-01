@@ -21,8 +21,9 @@ use azalea_physics::PhysicsSet;
 use bevy_app::{FixedUpdate, Update};
 use bevy_ecs::prelude::Event;
 use bevy_ecs::schedule::IntoSystemConfigs;
-use log::trace;
+use futures_lite::Future;
 use std::f64::consts::PI;
+use tracing::trace;
 
 use crate::pathfinder::PathfinderPlugin;
 
@@ -44,7 +45,8 @@ impl Plugin for BotPlugin {
     }
 }
 
-/// Component for all bots.
+/// A component that clients with [`BotPlugin`] will have. If you just want to
+/// check if an entity is one of our bots, you should use [`LocalEntity`].
 #[derive(Default, Component)]
 pub struct Bot {
     jumping_once: bool,
@@ -81,7 +83,7 @@ pub trait BotClientExt {
     /// that's necessary you'll have to do that yourself with [`look_at`].
     ///
     /// [`look_at`]: crate::prelude::BotClientExt::look_at
-    async fn mine(&mut self, position: BlockPos);
+    fn mine(&mut self, position: BlockPos) -> impl Future<Output = ()> + Send;
 }
 
 impl BotClientExt for azalea_client::Client {
@@ -146,7 +148,7 @@ pub fn jump_listener(
     mut query: Query<(&mut Jumping, &mut Bot)>,
     mut events: EventReader<JumpEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         if let Ok((mut jumping, mut bot)) = query.get_mut(event.entity) {
             **jumping = true;
             bot.jumping_once = true;
@@ -165,7 +167,7 @@ fn look_at_listener(
     mut events: EventReader<LookAtEvent>,
     mut query: Query<(&Position, &EyeHeight, &mut LookDirection)>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         if let Ok((position, eye_height, mut look_direction)) = query.get_mut(event.entity) {
             let (y_rot, x_rot) =
                 direction_looking_at(&position.up(eye_height.into()), &event.position);

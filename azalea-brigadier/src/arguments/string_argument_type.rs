@@ -1,4 +1,4 @@
-use std::{any::Any, rc::Rc};
+use std::{any::Any, sync::Arc};
 
 use crate::{
     context::CommandContext, exceptions::CommandSyntaxException, string_reader::StringReader,
@@ -17,7 +17,7 @@ pub enum StringArgument {
 }
 
 impl ArgumentType for StringArgument {
-    fn parse(&self, reader: &mut StringReader) -> Result<Rc<dyn Any>, CommandSyntaxException> {
+    fn parse(&self, reader: &mut StringReader) -> Result<Arc<dyn Any>, CommandSyntaxException> {
         let result = match self {
             StringArgument::SingleWord => reader.read_unquoted_string().to_string(),
             StringArgument::QuotablePhrase => reader.read_string()?,
@@ -27,7 +27,18 @@ impl ArgumentType for StringArgument {
                 text
             }
         };
-        Ok(Rc::new(result))
+        Ok(Arc::new(result))
+    }
+
+    fn examples(&self) -> Vec<String> {
+        match self {
+            StringArgument::SingleWord => vec!["word", "words_with_underscores"],
+            StringArgument::QuotablePhrase => vec!["\"quoted phrase\"", "word", "\"\""],
+            StringArgument::GreedyPhrase => vec!["word", "words with spaces", "\"and symbols\""],
+        }
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect()
     }
 }
 

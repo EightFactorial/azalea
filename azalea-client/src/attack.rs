@@ -15,7 +15,7 @@ use derive_more::{Deref, DerefMut};
 use crate::{
     interact::SwingArmEvent,
     local_player::{LocalGameMode, SendPacketEvent},
-    movement::walk_listener,
+    movement::MoveEventsSet,
     respawn::perform_respawn,
     Client,
 };
@@ -28,7 +28,7 @@ impl Plugin for AttackPlugin {
                 Update,
                 handle_attack_event
                     .before(update_bounding_box)
-                    .before(walk_listener)
+                    .before(MoveEventsSet)
                     .after(perform_respawn),
             )
             .add_systems(
@@ -53,7 +53,13 @@ impl Client {
 
     /// Whether the player has an attack cooldown.
     pub fn has_attack_cooldown(&self) -> bool {
-        let ticks_since_last_attack = *self.component::<AttackStrengthScale>();
+        let Some(AttackStrengthScale(ticks_since_last_attack)) =
+            self.get_component::<AttackStrengthScale>()
+        else {
+            // they don't even have an AttackStrengthScale so they probably can't attack
+            // lmao, just return false
+            return false;
+        };
         ticks_since_last_attack < 1.0
     }
 }
@@ -75,7 +81,7 @@ pub fn handle_attack_event(
     mut send_packet_events: EventWriter<SendPacketEvent>,
     mut swing_arm_event: EventWriter<SwingArmEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         let (game_mode, mut ticks_since_last_attack, mut physics, mut sprinting, sneaking) =
             query.get_mut(event.entity).unwrap();
 
@@ -100,7 +106,7 @@ pub fn handle_attack_event(
 
         ticks_since_last_attack.0 = 0;
 
-        physics.delta = physics.delta.multiply(0.6, 1.0, 0.6);
+        physics.velocity = physics.velocity.multiply(0.6, 1.0, 0.6);
         **sprinting = false;
     }
 }

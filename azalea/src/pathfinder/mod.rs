@@ -4,8 +4,10 @@
 pub mod astar;
 pub mod costs;
 pub mod goals;
+pub mod mining;
 pub mod moves;
 pub mod simulation;
+pub mod world;
 
 use crate::bot::{JumpEvent, LookAtEvent};
 use crate::pathfinder::astar::a_star;
@@ -20,25 +22,32 @@ use crate::ecs::{
     system::{Commands, Query, Res},
 };
 use crate::pathfinder::moves::PathfinderCtx;
-use azalea_client::movement::walk_listener;
+use crate::pathfinder::world::CachedWorld;
+use azalea_client::chat::SendChatEvent;
+use azalea_client::inventory::{InventoryComponent, InventorySet};
+use azalea_client::movement::MoveEventsSet;
 use azalea_client::{StartSprintEvent, StartWalkEvent};
-use azalea_core::position::BlockPos;
+use azalea_core::position::{BlockPos, Vec3};
 use azalea_entity::metadata::Player;
 use azalea_entity::LocalEntity;
 use azalea_entity::{Physics, Position};
 use azalea_physics::PhysicsSet;
 use azalea_world::{InstanceContainer, InstanceName};
 use bevy_app::{FixedUpdate, PreUpdate, Update};
+use bevy_ecs::event::Events;
 use bevy_ecs::prelude::Event;
 use bevy_ecs::query::Changed;
 use bevy_ecs::schedule::IntoSystemConfigs;
+use bevy_ecs::system::{Local, ResMut};
 use bevy_tasks::{AsyncComputeTaskPool, Task};
 use futures_lite::future;
-use log::{debug, error, info, trace, warn};
 use std::collections::VecDeque;
+use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tracing::{debug, error, info, trace, warn};
 
+use self::mining::MiningCache;
 use self::moves::{ExecuteCtx, IsReachedCtx, SuccessorsFn};
 
 #[derive(Clone, Default)]
@@ -47,11 +56,21 @@ impl Plugin for PathfinderPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<GotoEvent>()
             .add_event::<PathFoundEvent>()
+            .add_event::<StopPathfindingEvent>()
             .add_systems(
-                FixedUpdate,
                 // putting systems in the FixedUpdate schedule makes them run every Minecraft tick
                 // (every 50 milliseconds).
-                tick_execute_path
+                FixedUpdate,
+                (
+                    timeout_movement,
+                    check_node_reached,
+                    tick_execute_path,
+                    check_for_path_obstruction,
+                    debug_render_path_with_particles,
+                    recalculate_near_end_of_path,
+                    recalculate_if_has_goal_but_no_path,
+                )
+                    .chain()
                     .after(PhysicsSet)
                     .after(azalea_client::movement::send_position),
             )
@@ -62,26 +81,37 @@ impl Plugin for PathfinderPlugin {
                     goto_listener,
                     handle_tasks,
                     path_found_listener,
-                    stop_pathfinding_on_instance_change.before(walk_listener),
+                    stop_pathfinding_on_instance_change,
+                    handle_stop_pathfinding_event,
                 )
-                    .chain(),
+                    .chain()
+                    .before(MoveEventsSet)
+                    .before(InventorySet),
             );
     }
 }
 
-/// A component that makes this entity able to pathfind.
+/// A component that makes this client able to pathfind.
 #[derive(Component, Default)]
 pub struct Pathfinder {
-    pub path: VecDeque<astar::Movement<BlockPos, moves::MoveData>>,
-    pub queued_path: Option<VecDeque<astar::Movement<BlockPos, moves::MoveData>>>,
-    pub is_path_partial: bool,
-
-    pub last_reached_node: Option<BlockPos>,
-    pub last_node_reached_at: Option<Instant>,
     pub goal: Option<Arc<dyn Goal + Send + Sync>>,
     pub successors_fn: Option<SuccessorsFn>,
     pub is_calculating: bool,
+
+    pub goto_id: Arc<AtomicUsize>,
 }
+
+/// A component that's present on clients that are actively following a
+/// pathfinder path.
+#[derive(Component)]
+pub struct ExecutingPath {
+    pub path: VecDeque<astar::Movement<BlockPos, moves::MoveData>>,
+    pub queued_path: Option<VecDeque<astar::Movement<BlockPos, moves::MoveData>>>,
+    pub last_reached_node: BlockPos,
+    pub last_node_reached_at: Instant,
+    pub is_path_partial: bool,
+}
+
 #[derive(Event)]
 pub struct GotoEvent {
     pub entity: Entity,
@@ -90,7 +120,7 @@ pub struct GotoEvent {
     /// `pathfinder::moves::default_move`
     pub successors_fn: SuccessorsFn,
 }
-#[derive(Event)]
+#[derive(Event, Clone)]
 pub struct PathFoundEvent {
     pub entity: Entity,
     pub start: BlockPos,
@@ -111,6 +141,7 @@ fn add_default_pathfinder(
 
 pub trait PathfinderClientExt {
     fn goto(&self, goal: impl Goal + Send + Sync + 'static);
+    fn stop_pathfinding(&self);
 }
 
 impl PathfinderClientExt for azalea_client::Client {
@@ -128,6 +159,13 @@ impl PathfinderClientExt for azalea_client::Client {
             successors_fn: moves::default_move,
         });
     }
+
+    fn stop_pathfinding(&self) {
+        self.ecs.lock().send_event(StopPathfindingEvent {
+            entity: self.entity,
+            force: false,
+        });
+    }
 }
 
 #[derive(Component)]
@@ -136,13 +174,19 @@ pub struct ComputePath(Task<Option<PathFoundEvent>>);
 fn goto_listener(
     mut commands: Commands,
     mut events: EventReader<GotoEvent>,
-    mut query: Query<(&mut Pathfinder, &Position, &InstanceName)>,
+    mut query: Query<(
+        &mut Pathfinder,
+        Option<&ExecutingPath>,
+        &Position,
+        &InstanceName,
+        &InventoryComponent,
+    )>,
     instance_container: Res<InstanceContainer>,
 ) {
     let thread_pool = AsyncComputeTaskPool::get();
 
-    for event in events.iter() {
-        let (mut pathfinder, position, instance_name) = query
+    for event in events.read() {
+        let (mut pathfinder, executing_path, position, instance_name, inventory) = query
             .get_mut(event.entity)
             .expect("Called goto on an entity that's not in the world");
 
@@ -151,15 +195,16 @@ fn goto_listener(
         pathfinder.successors_fn = Some(event.successors_fn);
         pathfinder.is_calculating = true;
 
-        let start = if pathfinder.path.is_empty() {
-            BlockPos::from(position)
-        } else {
+        let start = if let Some(executing_path) = executing_path
+            && let Some(final_node) = executing_path.path.back() {
             // if we're currently pathfinding and got a goto event, start a little ahead
-            pathfinder
+            executing_path
                 .path
-                .get(5)
-                .unwrap_or_else(|| pathfinder.path.back().unwrap())
+                .get(20)
+                .unwrap_or(final_node)
                 .target
+        } else {
+            BlockPos::from(position)
         };
         info!(
             "got goto, starting from {start:?} (currently at {:?})",
@@ -175,14 +220,16 @@ fn goto_listener(
         let goal = event.goal.clone();
         let entity = event.entity;
 
+        let goto_id_atomic = pathfinder.goto_id.clone();
+        let goto_id = goto_id_atomic.fetch_add(1, atomic::Ordering::Relaxed) + 1;
+        let mining_cache = MiningCache::new(inventory.inventory_menu.clone());
+
         let task = thread_pool.spawn(async move {
             debug!("start: {start:?}");
 
-            let ctx = PathfinderCtx::new(world_lock);
+            let cached_world = CachedWorld::new(world_lock);
             let successors = |pos: BlockPos| {
-                let mut edges = Vec::with_capacity(16);
-                successors_fn(&mut edges, &ctx, pos);
-                edges
+                call_successors_fn(&cached_world, &mining_cache, successors_fn, pos)
             };
 
             let mut attempt_number = 0;
@@ -203,7 +250,9 @@ fn goto_listener(
                 debug!("partial: {partial:?}");
                 let duration = end_time - start_time;
                 if partial {
-                    info!("Pathfinder took {duration:?} (timed out)");
+                    info!("Pathfinder took {duration:?} (incomplete path)");
+                    // wait a bit so it's not a busy loop
+                    std::thread::sleep(Duration::from_millis(100));
                 } else {
                     info!("Pathfinder took {duration:?}");
                 }
@@ -215,6 +264,13 @@ fn goto_listener(
 
                 path = movements.into_iter().collect::<VecDeque<_>>();
                 is_partial = partial;
+
+                let goto_id_now = goto_id_atomic.load(atomic::Ordering::Relaxed);
+                if goto_id != goto_id_now {
+                    // we must've done another goto while calculating this path, so throw it away
+                    warn!("finished calculating a path, but it's outdated");
+                    return None;
+                }
 
                 if path.is_empty() && partial {
                     if attempt_number == 0 {
@@ -263,45 +319,51 @@ fn handle_tasks(
 // set the path for the target entity when we get the PathFoundEvent
 fn path_found_listener(
     mut events: EventReader<PathFoundEvent>,
-    mut query: Query<(&mut Pathfinder, &InstanceName)>,
+    mut query: Query<(
+        &mut Pathfinder,
+        Option<&mut ExecutingPath>,
+        &InstanceName,
+        &InventoryComponent,
+    )>,
     instance_container: Res<InstanceContainer>,
+    mut commands: Commands,
 ) {
-    for event in events.iter() {
-        let (mut pathfinder, instance_name) = query
+    for event in events.read() {
+        let (mut pathfinder, executing_path, instance_name, inventory) = query
             .get_mut(event.entity)
             .expect("Path found for an entity that doesn't have a pathfinder");
         if let Some(path) = &event.path {
-            if pathfinder.path.is_empty() {
-                pathfinder.path = path.to_owned();
-                debug!("set path to {:?}", path.iter().take(10).collect::<Vec<_>>());
-                pathfinder.last_reached_node = Some(event.start);
-            } else {
+            if let Some(mut executing_path) = executing_path {
                 let mut new_path = VecDeque::new();
 
                 // combine the old and new paths if the first node of the new path is a
                 // successor of the last node of the old path
-                if let Some(first_node) = path.front() {
-                    if let Some(last_node) = pathfinder.path.back() {
-                        let world_lock = instance_container.get(instance_name).expect(
-                            "Entity tried to pathfind but the entity isn't in a valid world",
-                        );
-                        let successors_fn: moves::SuccessorsFn = event.successors_fn;
-                        let ctx = PathfinderCtx::new(world_lock);
-                        let successors = |pos: BlockPos| {
-                            let mut edges = Vec::with_capacity(16);
-                            successors_fn(&mut edges, &ctx, pos);
-                            edges
-                        };
+                if let Some(last_node_of_current_path) = executing_path.path.back() {
+                    let world_lock = instance_container
+                        .get(instance_name)
+                        .expect("Entity tried to pathfind but the entity isn't in a valid world");
+                    let successors_fn: moves::SuccessorsFn = event.successors_fn;
+                    let cached_world = CachedWorld::new(world_lock);
+                    let mining_cache = MiningCache::new(inventory.inventory_menu.clone());
+                    let successors = |pos: BlockPos| {
+                        call_successors_fn(&cached_world, &mining_cache, successors_fn, pos)
+                    };
 
-                        if successors(last_node.target)
+                    if let Some(first_node_of_new_path) = path.front() {
+                        if successors(last_node_of_current_path.target)
                             .iter()
-                            .any(|edge| edge.movement.target == first_node.target)
+                            .any(|edge| edge.movement.target == first_node_of_new_path.target)
                         {
                             debug!("combining old and new paths");
-                            debug!("old path: {:?}", pathfinder.path.iter().collect::<Vec<_>>());
+                            debug!(
+                                "old path: {:?}",
+                                executing_path.path.iter().collect::<Vec<_>>()
+                            );
                             debug!("new path: {:?}", path.iter().take(10).collect::<Vec<_>>());
-                            new_path.extend(pathfinder.path.iter().cloned());
+                            new_path.extend(executing_path.path.iter().cloned());
                         }
+                    } else {
+                        new_path.extend(executing_path.path.iter().cloned());
                     }
                 }
 
@@ -311,98 +373,119 @@ fn path_found_listener(
                     "set queued path to {:?}",
                     new_path.iter().take(10).collect::<Vec<_>>()
                 );
-                pathfinder.queued_path = Some(new_path);
+                executing_path.queued_path = Some(new_path);
+                executing_path.is_path_partial = event.is_partial;
+            } else if path.is_empty() {
+                debug!("calculated path is empty, so didn't add ExecutingPath");
+            } else {
+                commands.entity(event.entity).insert(ExecutingPath {
+                    path: path.to_owned(),
+                    queued_path: None,
+                    last_reached_node: event.start,
+                    last_node_reached_at: Instant::now(),
+                    is_path_partial: event.is_partial,
+                });
+                debug!("set path to {:?}", path.iter().take(10).collect::<Vec<_>>());
+                debug!("partial: {}", event.is_partial);
             }
-            pathfinder.last_node_reached_at = Some(Instant::now());
         } else {
             error!("No path found");
-            pathfinder.path.clear();
-            pathfinder.queued_path = None;
+            if let Some(mut executing_path) = executing_path {
+                // set the queued path so we don't stop in the middle of a move
+                executing_path.queued_path = Some(VecDeque::new());
+            } else {
+                // wasn't executing a path, don't need to do anything
+            }
         }
         pathfinder.is_calculating = false;
-        pathfinder.is_path_partial = event.is_partial;
     }
 }
 
-fn tick_execute_path(
-    mut query: Query<(Entity, &mut Pathfinder, &Position, &Physics, &InstanceName)>,
-    mut look_at_events: EventWriter<LookAtEvent>,
-    mut sprint_events: EventWriter<StartSprintEvent>,
+fn timeout_movement(mut query: Query<(&Pathfinder, &mut ExecutingPath, &Position)>) {
+    for (pathfinder, mut executing_path, position) in &mut query {
+        if executing_path.last_node_reached_at.elapsed() > Duration::from_secs(2)
+            && !pathfinder.is_calculating
+            && !executing_path.path.is_empty()
+        {
+            warn!("pathfinder timeout");
+            // the path wasn't being followed anyways, so clearing it is fine
+            executing_path.path.clear();
+            executing_path.queued_path = None;
+            executing_path.last_reached_node = BlockPos::from(position);
+            // invalidate whatever calculation we were just doing, if any
+            pathfinder.goto_id.fetch_add(1, atomic::Ordering::Relaxed);
+            // set partial to true to make sure that a recalculation will happen
+            executing_path.is_path_partial = true;
+
+            // the path will get recalculated automatically because the path is
+            // empty
+        }
+    }
+}
+
+fn check_node_reached(
+    mut query: Query<(
+        Entity,
+        &mut Pathfinder,
+        &mut ExecutingPath,
+        &Position,
+        &Physics,
+    )>,
     mut walk_events: EventWriter<StartWalkEvent>,
-    mut jump_events: EventWriter<JumpEvent>,
-    mut goto_events: EventWriter<GotoEvent>,
-    instance_container: Res<InstanceContainer>,
+    mut commands: Commands,
 ) {
-    for (entity, mut pathfinder, position, physics, instance_name) in &mut query {
-        if pathfinder.goal.is_none() {
-            // no goal, no pathfinding
-            continue;
-        }
-
-        let successors_fn: moves::SuccessorsFn = pathfinder
-            .successors_fn
-            .expect("pathfinder.successors_fn should be Some if the goal is Some");
-
-        let world_lock = instance_container
-            .get(instance_name)
-            .expect("Entity tried to pathfind but the entity isn't in a valid world");
-
-        if !pathfinder.is_calculating {
-            // timeout check
-            if let Some(last_node_reached_at) = pathfinder.last_node_reached_at {
-                if last_node_reached_at.elapsed() > Duration::from_secs(2) {
-                    warn!("pathfinder timeout");
-                    pathfinder.path.clear();
-                    // set partial to true to make sure that the recalculation happens
-                    pathfinder.is_path_partial = true;
-                }
-            }
-        }
-
+    for (entity, mut pathfinder, mut executing_path, position, physics) in &mut query {
         'skip: loop {
             // we check if the goal was reached *before* actually executing the movement so
             // we don't unnecessarily execute a movement when it wasn't necessary
 
             // see if we already reached any future nodes and can skip ahead
-            for (i, movement) in pathfinder
+            for (i, movement) in executing_path
                 .path
                 .clone()
                 .into_iter()
                 .enumerate()
-                .take(10)
+                .take(20)
                 .rev()
             {
                 let is_reached_ctx = IsReachedCtx {
                     target: movement.target,
-                    start: pathfinder.last_reached_node.expect(
-                        "pathfinder.last_node_reached_at should always be present if there's a path",
-                    ),
+                    start: executing_path.last_reached_node,
                     position: **position,
                     physics,
                 };
-                let extra_strict_if_last = if i == pathfinder.path.len() - 1 {
-                    physics.on_ground && BlockPos::from(position) == movement.target
+                let extra_strict_if_last = if i == executing_path.path.len() - 1 {
+                    let x_difference_from_center = position.x - (movement.target.x as f64 + 0.5);
+                    let z_difference_from_center = position.z - (movement.target.z as f64 + 0.5);
+                    // this is to make sure we don't fall off immediately after finishing the path
+                    physics.on_ground
+                    && BlockPos::from(position) == movement.target
+                    // adding the delta like this isn't a perfect solution but it helps to make
+                    // sure we don't keep going if our delta is high
+                    && (x_difference_from_center + physics.velocity.x).abs() < 0.2
+                    && (z_difference_from_center + physics.velocity.z).abs() < 0.2
                 } else {
                     true
                 };
                 if (movement.data.is_reached)(is_reached_ctx) && extra_strict_if_last {
-                    pathfinder.path = pathfinder.path.split_off(i + 1);
-                    pathfinder.last_reached_node = Some(movement.target);
-                    pathfinder.last_node_reached_at = Some(Instant::now());
+                    executing_path.path = executing_path.path.split_off(i + 1);
+                    executing_path.last_reached_node = movement.target;
+                    executing_path.last_node_reached_at = Instant::now();
 
-                    if let Some(new_path) = pathfinder.queued_path.take() {
+                    if let Some(new_path) = executing_path.queued_path.take() {
                         debug!(
                             "swapped path to {:?}",
                             new_path.iter().take(10).collect::<Vec<_>>()
                         );
-                        pathfinder.path = new_path;
+                        executing_path.path = new_path;
 
-                        if pathfinder.path.is_empty() {
+                        if executing_path.path.is_empty() {
                             info!("the path we just swapped to was empty, so reached end of path");
                             walk_events.send(StartWalkEvent {
                                 entity,
                                 direction: WalkDirection::None,
                             });
+                            commands.entity(entity).remove::<ExecutingPath>();
                             break;
                         }
 
@@ -410,12 +493,13 @@ fn tick_execute_path(
                         continue 'skip;
                     }
 
-                    if pathfinder.path.is_empty() {
+                    if executing_path.path.is_empty() {
                         debug!("pathfinder path is now empty");
                         walk_events.send(StartWalkEvent {
                             entity,
                             direction: WalkDirection::None,
                         });
+                        commands.entity(entity).remove::<ExecutingPath>();
                         if let Some(goal) = pathfinder.goal.clone() {
                             if goal.success(movement.target) {
                                 info!("goal was reached!");
@@ -430,15 +514,122 @@ fn tick_execute_path(
             }
             break;
         }
+    }
+}
 
-        if let Some(movement) = pathfinder.path.front() {
+fn check_for_path_obstruction(
+    mut query: Query<(
+        &Pathfinder,
+        &mut ExecutingPath,
+        &InstanceName,
+        &InventoryComponent,
+    )>,
+    instance_container: Res<InstanceContainer>,
+) {
+    for (pathfinder, mut executing_path, instance_name, inventory) in &mut query {
+        let Some(successors_fn) = pathfinder.successors_fn else {
+            continue;
+        };
+
+        let world_lock = instance_container
+            .get(instance_name)
+            .expect("Entity tried to pathfind but the entity isn't in a valid world");
+
+        // obstruction check (the path we're executing isn't possible anymore)
+        let cached_world = CachedWorld::new(world_lock);
+        let mining_cache = MiningCache::new(inventory.inventory_menu.clone());
+        let successors =
+            |pos: BlockPos| call_successors_fn(&cached_world, &mining_cache, successors_fn, pos);
+
+        if let Some(obstructed_index) = check_path_obstructed(
+            executing_path.last_reached_node,
+            &executing_path.path,
+            successors,
+        ) {
+            warn!(
+                "path obstructed at index {obstructed_index} (starting at {:?}, path: {:?})",
+                executing_path.last_reached_node, executing_path.path
+            );
+            executing_path.path.truncate(obstructed_index);
+            executing_path.is_path_partial = true;
+        }
+    }
+}
+
+fn recalculate_near_end_of_path(
+    mut query: Query<(Entity, &mut Pathfinder, &mut ExecutingPath)>,
+    mut walk_events: EventWriter<StartWalkEvent>,
+    mut goto_events: EventWriter<GotoEvent>,
+    mut commands: Commands,
+) {
+    for (entity, mut pathfinder, mut executing_path) in &mut query {
+        let Some(successors_fn) = pathfinder.successors_fn else {
+            continue;
+        };
+
+        // start recalculating if the path ends soon
+        if (executing_path.path.len() == 20 || executing_path.path.len() < 5)
+            && !pathfinder.is_calculating
+            && executing_path.is_path_partial
+        {
+            if let Some(goal) = pathfinder.goal.as_ref().cloned() {
+                debug!("Recalculating path because it ends soon");
+                debug!(
+                    "recalculate_near_end_of_path executing_path.is_path_partial: {}",
+                    executing_path.is_path_partial
+                );
+                goto_events.send(GotoEvent {
+                    entity,
+                    goal,
+                    successors_fn,
+                });
+                pathfinder.is_calculating = true;
+
+                if executing_path.path.is_empty() {
+                    if let Some(new_path) = executing_path.queued_path.take() {
+                        executing_path.path = new_path;
+                        if executing_path.path.is_empty() {
+                            info!("the path we just swapped to was empty, so reached end of path");
+                            walk_events.send(StartWalkEvent {
+                                entity,
+                                direction: WalkDirection::None,
+                            });
+                            commands.entity(entity).remove::<ExecutingPath>();
+                            break;
+                        }
+                    } else {
+                        walk_events.send(StartWalkEvent {
+                            entity,
+                            direction: WalkDirection::None,
+                        });
+                        commands.entity(entity).remove::<ExecutingPath>();
+                    }
+                }
+            } else if executing_path.path.is_empty() {
+                // idk when this can happen but stop moving just in case
+                walk_events.send(StartWalkEvent {
+                    entity,
+                    direction: WalkDirection::None,
+                });
+            }
+        }
+    }
+}
+
+fn tick_execute_path(
+    mut query: Query<(Entity, &mut ExecutingPath, &Position, &Physics)>,
+    mut look_at_events: EventWriter<LookAtEvent>,
+    mut sprint_events: EventWriter<StartSprintEvent>,
+    mut walk_events: EventWriter<StartWalkEvent>,
+    mut jump_events: EventWriter<JumpEvent>,
+) {
+    for (entity, executing_path, position, physics) in &mut query {
+        if let Some(movement) = executing_path.path.front() {
             let ctx = ExecuteCtx {
                 entity,
                 target: movement.target,
                 position: **position,
-                start: pathfinder.last_reached_node.expect(
-                    "pathfinder.last_reached_node should always be present if there's a path",
-                ),
+                start: executing_path.last_reached_node,
                 physics,
                 look_at_events: &mut look_at_events,
                 sprint_events: &mut sprint_events,
@@ -448,77 +639,164 @@ fn tick_execute_path(
             trace!("executing move");
             (movement.data.execute)(ctx);
         }
+    }
+}
 
-        {
-            // obstruction check (the path we're executing isn't possible anymore)
-            let ctx = PathfinderCtx::new(world_lock);
-            let successors = |pos: BlockPos| {
-                let mut edges = Vec::with_capacity(16);
-                successors_fn(&mut edges, &ctx, pos);
-                edges
-            };
-
-            if let Some(last_reached_node) = pathfinder.last_reached_node {
-                if let Some(obstructed_index) =
-                    check_path_obstructed(last_reached_node, &pathfinder.path, successors)
-                {
-                    warn!("path obstructed at index {obstructed_index} (starting at {last_reached_node:?}, path: {:?})", pathfinder.path);
-                    pathfinder.path.truncate(obstructed_index);
-                }
-            }
-        }
-
-        {
-            // start recalculating if the path ends soon
-            if pathfinder.path.len() < 5 && !pathfinder.is_calculating && pathfinder.is_path_partial
-            {
-                if let Some(goal) = pathfinder.goal.as_ref().cloned() {
-                    debug!("Recalculating path because it ends soon");
-                    goto_events.send(GotoEvent {
-                        entity,
-                        goal,
-                        successors_fn,
-                    });
-                    pathfinder.is_calculating = true;
-
-                    if pathfinder.path.is_empty() {
-                        if let Some(new_path) = pathfinder.queued_path.take() {
-                            pathfinder.path = new_path;
-                            if pathfinder.path.is_empty() {
-                                info!(
-                                    "the path we just swapped to was empty, so reached end of path"
-                                );
-                                walk_events.send(StartWalkEvent {
-                                    entity,
-                                    direction: WalkDirection::None,
-                                });
-                                break;
-                            }
-                        } else {
-                            walk_events.send(StartWalkEvent {
-                                entity,
-                                direction: WalkDirection::None,
-                            });
-                        }
-                    }
-                }
+fn recalculate_if_has_goal_but_no_path(
+    mut query: Query<(Entity, &mut Pathfinder), Without<ExecutingPath>>,
+    mut goto_events: EventWriter<GotoEvent>,
+) {
+    for (entity, mut pathfinder) in &mut query {
+        if pathfinder.goal.is_some() && !pathfinder.is_calculating {
+            if let Some(goal) = pathfinder.goal.as_ref().cloned() {
+                debug!("Recalculating path because it has a goal but no ExecutingPath");
+                goto_events.send(GotoEvent {
+                    entity,
+                    goal,
+                    successors_fn: pathfinder.successors_fn.unwrap(),
+                });
+                pathfinder.is_calculating = true;
             }
         }
     }
 }
 
-fn stop_pathfinding_on_instance_change(
-    mut query: Query<(Entity, &mut Pathfinder), Changed<InstanceName>>,
+#[derive(Event)]
+pub struct StopPathfindingEvent {
+    pub entity: Entity,
+    /// If false, then let the current movement finish before stopping. If true,
+    /// then stop moving immediately. This might cause the bot to fall if it was
+    /// in the middle of parkouring.
+    pub force: bool,
+}
+
+fn handle_stop_pathfinding_event(
+    mut events: EventReader<StopPathfindingEvent>,
+    mut query: Query<(&mut Pathfinder, &mut ExecutingPath)>,
     mut walk_events: EventWriter<StartWalkEvent>,
+    mut commands: Commands,
 ) {
-    for (entity, mut pathfinder) in &mut query {
-        if !pathfinder.path.is_empty() {
-            debug!("instance changed, clearing path");
-            pathfinder.path.clear();
+    for event in events.read() {
+        let Ok((mut pathfinder, mut executing_path)) = query.get_mut(event.entity) else {
+            continue;
+        };
+        pathfinder.goal = None;
+        if event.force {
+            executing_path.path.clear();
+            executing_path.queued_path = None;
             walk_events.send(StartWalkEvent {
-                entity,
+                entity: event.entity,
                 direction: WalkDirection::None,
             });
+            commands.entity(event.entity).remove::<ExecutingPath>();
+        } else {
+            executing_path.queued_path = Some(VecDeque::new());
+        }
+    }
+}
+
+fn stop_pathfinding_on_instance_change(
+    mut query: Query<(Entity, &mut ExecutingPath), Changed<InstanceName>>,
+    mut stop_pathfinding_events: EventWriter<StopPathfindingEvent>,
+) {
+    for (entity, mut executing_path) in &mut query {
+        if !executing_path.path.is_empty() {
+            debug!("instance changed, clearing path");
+            executing_path.path.clear();
+            stop_pathfinding_events.send(StopPathfindingEvent {
+                entity,
+                force: true,
+            });
+        }
+    }
+}
+
+/// A component that makes bots run /particle commands while pathfinding to show
+/// where they're going. This requires the bots to have server operator
+/// permissions, and it'll make them spam *a lot* of commands.
+///
+/// ```
+/// # use azalea::prelude::*;
+/// # use azalea::pathfinder::PathfinderDebugParticles;
+/// # #[derive(Component, Clone, Default)]
+/// # pub struct State;
+///
+/// async fn handle(mut bot: Client, event: azalea::Event, state: State) -> anyhow::Result<()> {
+///     match event {
+///         azalea::Event::Init => {
+///             bot.ecs
+///                 .lock()
+///                 .entity_mut(bot.entity)
+///                 .insert(PathfinderDebugParticles);
+///         }
+///         _ => {}
+///     }
+///     Ok(())
+/// }
+/// ```
+#[derive(Component)]
+pub struct PathfinderDebugParticles;
+
+fn debug_render_path_with_particles(
+    mut query: Query<(Entity, &ExecutingPath), With<PathfinderDebugParticles>>,
+    // chat_events is Option because the tests don't have SendChatEvent
+    // and we have to use ResMut<Events> because bevy doesn't support Option<EventWriter>
+    chat_events: Option<ResMut<Events<SendChatEvent>>>,
+    mut tick_count: Local<usize>,
+) {
+    let Some(mut chat_events) = chat_events else {
+        return;
+    };
+    if *tick_count >= 2 {
+        *tick_count = 0;
+    } else {
+        *tick_count += 1;
+        return;
+    }
+    for (entity, executing_path) in &mut query {
+        if executing_path.path.is_empty() {
+            continue;
+        }
+
+        let mut start = executing_path.last_reached_node;
+        for (i, movement) in executing_path.path.iter().enumerate() {
+            // /particle dust 0 1 1 1 ~ ~ ~ 0 0 0.2 0 100
+
+            let end = movement.target;
+
+            let start_vec3 = start.center();
+            let end_vec3 = end.center();
+
+            let step_count = (start_vec3.distance_to_sqr(&end_vec3).sqrt() * 4.0) as usize;
+
+            let (r, g, b): (f64, f64, f64) = if i == 0 { (0., 1., 0.) } else { (0., 1., 1.) };
+
+            // interpolate between the start and end positions
+            for i in 0..step_count {
+                let percent = i as f64 / step_count as f64;
+                let pos = Vec3 {
+                    x: start_vec3.x + (end_vec3.x - start_vec3.x) * percent,
+                    y: start_vec3.y + (end_vec3.y - start_vec3.y) * percent,
+                    z: start_vec3.z + (end_vec3.z - start_vec3.z) * percent,
+                };
+                let particle_command = format!(
+                "/particle dust {r} {g} {b} {size} {start_x} {start_y} {start_z} {delta_x} {delta_y} {delta_z} 0 {count}",
+                size = 1,
+                start_x = pos.x,
+                start_y = pos.y,
+                start_z = pos.z,
+                delta_x = 0,
+                delta_y = 0,
+                delta_z = 0,
+                count = 1
+            );
+                chat_events.send(SendChatEvent {
+                    entity,
+                    content: particle_command,
+                });
+            }
+
+            start = movement.target;
         }
     }
 }
@@ -557,9 +835,29 @@ where
     None
 }
 
+pub fn call_successors_fn(
+    cached_world: &CachedWorld,
+    mining_cache: &MiningCache,
+    successors_fn: SuccessorsFn,
+    pos: BlockPos,
+) -> Vec<astar::Edge<BlockPos, moves::MoveData>> {
+    let mut edges = Vec::with_capacity(16);
+    let mut ctx = PathfinderCtx {
+        edges: &mut edges,
+        world: cached_world,
+        mining_cache,
+    };
+    successors_fn(&mut ctx, pos);
+    edges
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
+    use std::{
+        collections::HashSet,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
 
     use azalea_core::position::{BlockPos, ChunkPos, Vec3};
     use azalea_world::{Chunk, ChunkStorage, PartialChunkStorage};
@@ -610,6 +908,22 @@ mod tests {
         simulation
     }
 
+    pub fn assert_simulation_reaches(simulation: &mut Simulation, ticks: usize, end_pos: BlockPos) {
+        // wait until the bot starts moving
+        let start_pos = simulation.position();
+        let start_time = Instant::now();
+        while simulation.position() == start_pos
+            && start_time.elapsed() < Duration::from_millis(500)
+        {
+            simulation.tick();
+            std::thread::yield_now();
+        }
+        for _ in 0..ticks {
+            simulation.tick();
+        }
+        assert_eq!(BlockPos::from(simulation.position()), end_pos,);
+    }
+
     #[test]
     fn test_simple_forward() {
         let mut partial_chunks = PartialChunkStorage::default();
@@ -619,13 +933,7 @@ mod tests {
             BlockPos::new(0, 71, 1),
             vec![BlockPos::new(0, 70, 0), BlockPos::new(0, 70, 1)],
         );
-        for _ in 0..20 {
-            simulation.tick();
-        }
-        assert_eq!(
-            BlockPos::from(simulation.position()),
-            BlockPos::new(0, 71, 1)
-        );
+        assert_simulation_reaches(&mut simulation, 20, BlockPos::new(0, 71, 1));
     }
 
     #[test]
@@ -643,13 +951,7 @@ mod tests {
                 BlockPos::new(2, 72, 1),
             ],
         );
-        for _ in 0..30 {
-            simulation.tick();
-        }
-        assert_eq!(
-            BlockPos::from(simulation.position()),
-            BlockPos::new(2, 71, 2)
-        );
+        assert_simulation_reaches(&mut simulation, 30, BlockPos::new(2, 71, 2));
     }
 
     #[test]
@@ -671,13 +973,7 @@ mod tests {
                 BlockPos::new(5, 75, 0),
             ],
         );
-        for _ in 0..120 {
-            simulation.tick();
-        }
-        assert_eq!(
-            BlockPos::from(simulation.position()),
-            BlockPos::new(5, 76, 0)
-        );
+        assert_simulation_reaches(&mut simulation, 120, BlockPos::new(5, 76, 0));
     }
 
     #[test]
@@ -689,13 +985,7 @@ mod tests {
             BlockPos::new(0, 71, 3),
             vec![BlockPos::new(0, 70, 0), BlockPos::new(0, 70, 3)],
         );
-        for _ in 0..40 {
-            simulation.tick();
-        }
-        assert_eq!(
-            BlockPos::from(simulation.position()),
-            BlockPos::new(0, 71, 3)
-        );
+        assert_simulation_reaches(&mut simulation, 40, BlockPos::new(0, 71, 3));
     }
 
     #[test]
@@ -714,13 +1004,24 @@ mod tests {
                 BlockPos::new(3, 66, 4),
             ],
         );
-        for _ in 0..100 {
-            simulation.tick();
-        }
-        assert_eq!(
-            BlockPos::from(simulation.position()),
-            BlockPos::new(3, 67, 4)
+        assert_simulation_reaches(&mut simulation, 100, BlockPos::new(3, 67, 4));
+    }
+
+    #[test]
+    fn test_small_descend_and_parkour_2_block_gap() {
+        let mut partial_chunks = PartialChunkStorage::default();
+        let mut simulation = setup_simulation(
+            &mut partial_chunks,
+            BlockPos::new(0, 71, 0),
+            BlockPos::new(0, 70, 5),
+            vec![
+                BlockPos::new(0, 70, 0),
+                BlockPos::new(0, 70, 1),
+                BlockPos::new(0, 69, 2),
+                BlockPos::new(0, 69, 5),
+            ],
         );
+        assert_simulation_reaches(&mut simulation, 40, BlockPos::new(0, 70, 5));
     }
 
     #[test]
@@ -737,12 +1038,41 @@ mod tests {
                 BlockPos::new(0, 67, 3),
             ],
         );
-        for _ in 0..60 {
-            simulation.tick();
-        }
-        assert_eq!(
-            BlockPos::from(simulation.position()),
-            BlockPos::new(0, 68, 3)
+        assert_simulation_reaches(&mut simulation, 60, BlockPos::new(0, 68, 3));
+    }
+
+    #[test]
+    fn test_2_gap_ascend_thrice() {
+        let mut partial_chunks = PartialChunkStorage::default();
+        let mut simulation = setup_simulation(
+            &mut partial_chunks,
+            BlockPos::new(0, 71, 0),
+            BlockPos::new(3, 74, 0),
+            vec![
+                BlockPos::new(0, 70, 0),
+                BlockPos::new(0, 71, 3),
+                BlockPos::new(3, 72, 3),
+                BlockPos::new(3, 73, 0),
+            ],
         );
+        assert_simulation_reaches(&mut simulation, 60, BlockPos::new(3, 74, 0));
+    }
+
+    #[test]
+    fn test_consecutive_3_gap_parkour() {
+        let mut partial_chunks = PartialChunkStorage::default();
+        let mut simulation = setup_simulation(
+            &mut partial_chunks,
+            BlockPos::new(0, 71, 0),
+            BlockPos::new(4, 71, 12),
+            vec![
+                BlockPos::new(0, 70, 0),
+                BlockPos::new(0, 70, 4),
+                BlockPos::new(0, 70, 8),
+                BlockPos::new(0, 70, 12),
+                BlockPos::new(4, 70, 12),
+            ],
+        );
+        assert_simulation_reaches(&mut simulation, 80, BlockPos::new(4, 71, 12));
     }
 }

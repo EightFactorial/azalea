@@ -8,9 +8,9 @@ use bevy_ecs::{
     query::Changed,
     system::{Commands, Query, Res, ResMut, Resource},
 };
-use log::{debug, warn};
 use nohash_hasher::IntMap;
 use std::{collections::HashMap, fmt::Debug};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{EntityUuid, LastSentPosition, Position};
@@ -26,6 +26,9 @@ pub struct EntityUuidIndex {
 /// An index of Minecraft entity IDs to Azalea ECS entities. This is a
 /// `Component` so local players can keep track of entity IDs independently from
 /// the instance.
+///
+/// If you need a per-instance instead of per-client version of this, you can
+/// use [`Instance::entity_by_id`].
 #[derive(Component, Default)]
 pub struct EntityIdIndex {
     /// An index of entities by their MinecraftEntityId

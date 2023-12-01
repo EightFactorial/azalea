@@ -39,6 +39,11 @@ macro_rules! vec3_impl {
                 self.x * self.x + self.z * self.z
             }
 
+            #[inline]
+            pub fn horizontal_distance_to_sqr(&self, other: &Self) -> $type {
+                (self - other).horizontal_distance_sqr()
+            }
+
             /// Return a new instance of this position with the y coordinate
             /// decreased by the given number.
             #[inline]
@@ -163,7 +168,7 @@ impl Vec3 {
         f64::sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
     }
 
-    /// Get the squared distance from this position to another position.
+    /// Get the distance from this position to another position.
     /// Equivalent to `(self - other).length()`.
     pub fn distance_to(&self, other: &Self) -> f64 {
         (self - other).length()
@@ -329,7 +334,8 @@ impl Hash for ChunkSectionBlockPos {
 impl From<ChunkSectionBlockPos> for u16 {
     #[inline]
     fn from(pos: ChunkSectionBlockPos) -> Self {
-        (pos.z as u16) | ((pos.y as u16) << 4) | ((pos.x as u16) << 8)
+        // (pos.z as u16) | ((pos.y as u16) << 4) | ((pos.x as u16) << 8)
+        ((((pos.y as u16) << 4) | pos.z as u16) << 4) | pos.x as u16
     }
 }
 impl nohash_hasher::IsEnabled for ChunkSectionBlockPos {}
@@ -346,8 +352,8 @@ impl From<&BlockPos> for ChunkPos {
     #[inline]
     fn from(pos: &BlockPos) -> Self {
         ChunkPos {
-            x: pos.x.div_floor(16),
-            z: pos.z.div_floor(16),
+            x: pos.x >> 4,
+            z: pos.z >> 4,
         }
     }
 }
@@ -355,8 +361,8 @@ impl From<BlockPos> for ChunkPos {
     #[inline]
     fn from(pos: BlockPos) -> Self {
         ChunkPos {
-            x: pos.x.div_floor(16),
-            z: pos.z.div_floor(16),
+            x: pos.x >> 4,
+            z: pos.z >> 4,
         }
     }
 }
@@ -392,9 +398,9 @@ impl From<&BlockPos> for ChunkBlockPos {
     #[inline]
     fn from(pos: &BlockPos) -> Self {
         ChunkBlockPos {
-            x: pos.x.rem_euclid(16) as u8,
+            x: (pos.x & 0xF) as u8,
             y: pos.y,
-            z: pos.z.rem_euclid(16) as u8,
+            z: (pos.z & 0xF) as u8,
         }
     }
 }
@@ -402,9 +408,9 @@ impl From<BlockPos> for ChunkBlockPos {
     #[inline]
     fn from(pos: BlockPos) -> Self {
         ChunkBlockPos {
-            x: pos.x.rem_euclid(16) as u8,
+            x: (pos.x & 0xF) as u8,
             y: pos.y,
-            z: pos.z.rem_euclid(16) as u8,
+            z: (pos.z & 0xF) as u8,
         }
     }
 }
@@ -425,7 +431,7 @@ impl From<&ChunkBlockPos> for ChunkSectionBlockPos {
     fn from(pos: &ChunkBlockPos) -> Self {
         ChunkSectionBlockPos {
             x: pos.x,
-            y: pos.y.rem_euclid(16) as u8,
+            y: (pos.y & 0xF) as u8,
             z: pos.z,
         }
     }

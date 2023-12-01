@@ -1,45 +1,162 @@
-use azalea_client::{SprintDirection, StartSprintEvent, StartWalkEvent, WalkDirection};
+use azalea_client::{SprintDirection, WalkDirection};
 use azalea_core::{direction::CardinalDirection, position::BlockPos};
 
-use crate::{
-    pathfinder::{astar, costs::*},
-    JumpEvent, LookAtEvent,
-};
+use crate::pathfinder::{astar, costs::*};
 
-use super::{default_is_reached, Edge, ExecuteCtx, IsReachedCtx, MoveData, PathfinderCtx};
+use super::{Edge, ExecuteCtx, IsReachedCtx, MoveData, PathfinderCtx};
 
-pub fn parkour_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, node: BlockPos) {
-    parkour_forward_1_move(edges, ctx, node);
-    parkour_headhitter_forward_1_move(edges, ctx, node);
-    parkour_forward_2_move(edges, ctx, node);
+pub fn parkour_move(ctx: &mut PathfinderCtx, node: BlockPos) {
+    parkour_forward_1_move(ctx, node);
+    parkour_forward_2_move(ctx, node);
+    parkour_forward_3_move(ctx, node);
 }
 
-fn parkour_forward_1_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
+fn parkour_forward_1_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let gap_offset = BlockPos::new(dir.x(), 0, dir.z());
         let offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
 
         // make sure we actually have to jump
-        if ctx.is_block_solid((pos + gap_offset).down(1)) {
+        if ctx.world.is_block_solid((pos + gap_offset).down(1)) {
             continue;
         }
-        if !ctx.is_standable(pos + offset) {
-            continue;
-        }
-        if !ctx.is_passable(pos + gap_offset) {
-            continue;
-        }
-        if !ctx.is_block_passable((pos + gap_offset).up(2)) {
-            continue;
-        }
-        // make sure it's not a headhitter
-        if !ctx.is_block_passable(pos.up(2)) {
+        if !ctx.world.is_passable(pos + gap_offset) {
             continue;
         }
 
-        let cost = JUMP_PENALTY + WALK_ONE_BLOCK_COST * 2.;
+        let ascend: i32 = if ctx.world.is_standable(pos + offset.up(1)) {
+            // ascend
+            1
+        } else if ctx.world.is_standable(pos + offset) {
+            // forward
+            0
+        } else {
+            continue;
+        };
 
-        edges.push(Edge {
+        // make sure we have space to jump
+        if !ctx.world.is_block_passable((pos + gap_offset).up(2)) {
+            continue;
+        }
+
+        // make sure there's not a block above us
+        if !ctx.world.is_block_passable(pos.up(2)) {
+            continue;
+        }
+        // make sure there's not a block above the target
+        if !ctx.world.is_block_passable((pos + offset).up(2)) {
+            continue;
+        }
+
+        let cost = JUMP_PENALTY + WALK_ONE_BLOCK_COST * 2. + CENTER_AFTER_FALL_COST;
+
+        ctx.edges.push(Edge {
+            movement: astar::Movement {
+                target: pos + offset.up(ascend),
+                data: MoveData {
+                    execute: &execute_parkour_move,
+                    is_reached: &parkour_is_reached,
+                },
+            },
+            cost,
+        })
+    }
+}
+
+fn parkour_forward_2_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
+    'dir: for dir in CardinalDirection::iter() {
+        let gap_1_offset = BlockPos::new(dir.x(), 0, dir.z());
+        let gap_2_offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
+        let offset = BlockPos::new(dir.x() * 3, 0, dir.z() * 3);
+
+        // make sure we actually have to jump
+        if ctx.world.is_block_solid((pos + gap_1_offset).down(1))
+            || ctx.world.is_block_solid((pos + gap_2_offset).down(1))
+        {
+            continue;
+        }
+
+        let ascend: i32 = if ctx.world.is_standable(pos + offset.up(1)) {
+            1
+        } else if ctx.world.is_standable(pos + offset) {
+            0
+        } else {
+            continue;
+        };
+
+        // make sure we have space to jump
+        for offset in [gap_1_offset, gap_2_offset] {
+            if !ctx.world.is_passable(pos + offset) {
+                continue 'dir;
+            }
+            if !ctx.world.is_block_passable((pos + offset).up(2)) {
+                continue 'dir;
+            }
+        }
+        // make sure there's not a block above us
+        if !ctx.world.is_block_passable(pos.up(2)) {
+            continue;
+        }
+        // make sure there's not a block above the target
+        if !ctx.world.is_block_passable((pos + offset).up(2)) {
+            continue;
+        }
+
+        let cost = JUMP_PENALTY + WALK_ONE_BLOCK_COST * 3. + CENTER_AFTER_FALL_COST;
+
+        ctx.edges.push(Edge {
+            movement: astar::Movement {
+                target: pos + offset.up(ascend),
+                data: MoveData {
+                    execute: &execute_parkour_move,
+                    is_reached: &parkour_is_reached,
+                },
+            },
+            cost,
+        })
+    }
+}
+
+fn parkour_forward_3_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
+    'dir: for dir in CardinalDirection::iter() {
+        let gap_1_offset = BlockPos::new(dir.x(), 0, dir.z());
+        let gap_2_offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
+        let gap_3_offset = BlockPos::new(dir.x() * 3, 0, dir.z() * 3);
+        let offset = BlockPos::new(dir.x() * 4, 0, dir.z() * 4);
+
+        // make sure we actually have to jump
+        if ctx.world.is_block_solid((pos + gap_1_offset).down(1))
+            || ctx.world.is_block_solid((pos + gap_2_offset).down(1))
+            || ctx.world.is_block_solid((pos + gap_3_offset).down(1))
+        {
+            continue;
+        }
+
+        if !ctx.world.is_standable(pos + offset) {
+            continue;
+        };
+
+        // make sure we have space to jump
+        for offset in [gap_1_offset, gap_2_offset, gap_3_offset] {
+            if !ctx.world.is_passable(pos + offset) {
+                continue 'dir;
+            }
+            if !ctx.world.is_block_passable((pos + offset).up(2)) {
+                continue 'dir;
+            }
+        }
+        // make sure there's not a block above us
+        if !ctx.world.is_block_passable(pos.up(2)) {
+            continue;
+        }
+        // make sure there's not a block above the target
+        if !ctx.world.is_block_passable((pos + offset).up(2)) {
+            continue;
+        }
+
+        let cost = JUMP_PENALTY + SPRINT_ONE_BLOCK_COST * 4. + CENTER_AFTER_FALL_COST;
+
+        ctx.edges.push(Edge {
             movement: astar::Movement {
                 target: pos + offset,
                 data: MoveData {
@@ -52,123 +169,26 @@ fn parkour_forward_1_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: Block
     }
 }
 
-fn parkour_forward_2_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
-    for dir in CardinalDirection::iter() {
-        let gap_1_offset = BlockPos::new(dir.x(), 0, dir.z());
-        let gap_2_offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
-        let offset = BlockPos::new(dir.x() * 3, 0, dir.z() * 3);
-
-        // make sure we actually have to jump
-        if ctx.is_block_solid((pos + gap_1_offset).down(1))
-            || ctx.is_block_solid((pos + gap_2_offset).down(1))
-        {
-            continue;
-        }
-
-        if !ctx.is_standable(pos + offset) {
-            continue;
-        }
-        if !ctx.is_passable(pos + gap_1_offset) {
-            continue;
-        }
-        if !ctx.is_block_passable((pos + gap_1_offset).up(2)) {
-            continue;
-        }
-        if !ctx.is_passable(pos + gap_2_offset) {
-            continue;
-        }
-        if !ctx.is_block_passable((pos + gap_2_offset).up(2)) {
-            continue;
-        }
-        // make sure it's not a headhitter
-        if !ctx.is_block_passable(pos.up(2)) {
-            continue;
-        }
-
-        let cost = JUMP_PENALTY + WALK_ONE_BLOCK_COST * 3.;
-
-        edges.push(Edge {
-            movement: astar::Movement {
-                target: pos + offset,
-                data: MoveData {
-                    execute: &execute_parkour_move,
-                    is_reached: &default_is_reached,
-                },
-            },
-            cost,
-        })
-    }
-}
-
-fn parkour_headhitter_forward_1_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
-    for dir in CardinalDirection::iter() {
-        let gap_offset = BlockPos::new(dir.x(), 0, dir.z());
-        let offset = BlockPos::new(dir.x() * 2, 0, dir.z() * 2);
-
-        // make sure we actually have to jump
-        if ctx.is_block_solid((pos + gap_offset).down(1)) {
-            continue;
-        }
-        if !ctx.is_standable(pos + offset) {
-            continue;
-        }
-        if !ctx.is_passable(pos + gap_offset) {
-            continue;
-        }
-        if !ctx.is_block_passable((pos + gap_offset).up(2)) {
-            continue;
-        }
-        // make sure it is a headhitter
-        if !ctx.is_block_solid(pos.up(2)) {
-            continue;
-        }
-
-        let cost = JUMP_PENALTY + WALK_ONE_BLOCK_COST + WALK_ONE_BLOCK_COST;
-
-        edges.push(Edge {
-            movement: astar::Movement {
-                target: pos + offset,
-                data: MoveData {
-                    execute: &execute_headhitter_parkour_move,
-                    is_reached: &default_is_reached,
-                },
-            },
-            cost,
-        })
-    }
-}
-
-fn execute_parkour_move(
-    ExecuteCtx {
-        entity,
+fn execute_parkour_move(mut ctx: ExecuteCtx) {
+    let ExecuteCtx {
         position,
         target,
         start,
-        look_at_events,
-        sprint_events,
-        walk_events,
-        jump_events,
         ..
-    }: ExecuteCtx,
-) {
-    let center = target.center();
-    look_at_events.send(LookAtEvent {
-        entity,
-        position: center,
-    });
+    } = ctx;
+
+    let start_center = start.center();
+    let target_center = target.center();
 
     let jump_distance = i32::max((target - start).x.abs(), (target - start).z.abs());
 
-    if jump_distance >= 4 {
-        sprint_events.send(StartSprintEvent {
-            entity,
-            direction: SprintDirection::Forward,
-        });
+    let ascend: i32 = target.y - start.y;
+
+    if jump_distance >= 4 || (ascend > 0 && jump_distance >= 3) {
+        // 3 block gap OR 2 block gap with ascend
+        ctx.sprint(SprintDirection::Forward);
     } else {
-        walk_events.send(StartWalkEvent {
-            entity,
-            direction: WalkDirection::Forward,
-        });
+        ctx.walk(WalkDirection::Forward);
     }
 
     let x_dir = (target.x - start.x).clamp(-1, 1);
@@ -178,54 +198,32 @@ fn execute_parkour_move(
 
     let is_at_start_block = BlockPos::from(position) == start;
     let is_at_jump_block = BlockPos::from(position) == jump_at_pos;
-    let is_in_air = position.y - start.y as f64 > 0.0001;
 
-    if !is_at_start_block && (is_at_jump_block || is_in_air) {
-        jump_events.send(JumpEvent { entity });
-    }
-}
-
-fn execute_headhitter_parkour_move(
-    ExecuteCtx {
-        entity,
-        target,
-        start,
-        position,
-        look_at_events,
-        sprint_events,
-        walk_events,
-        jump_events,
-        ..
-    }: ExecuteCtx,
-) {
-    let center = target.center();
-    look_at_events.send(LookAtEvent {
-        entity,
-        position: center,
-    });
-
-    let jump_distance = i32::max((target - start).x.abs(), (target - start).z.abs());
-
-    if jump_distance > 2 {
-        sprint_events.send(StartSprintEvent {
-            entity,
-            direction: SprintDirection::Forward,
-        });
+    let required_distance_from_center = if jump_distance <= 2 {
+        // 1 block gap
+        0.0
     } else {
-        walk_events.send(StartWalkEvent {
-            entity,
-            direction: WalkDirection::Forward,
-        });
-    }
-
-    let start_center = start.center();
+        0.6
+    };
     let distance_from_start = f64::max(
-        (start_center.x - position.x).abs(),
-        (start_center.z - position.z).abs(),
+        (position.x - start_center.x).abs(),
+        (position.z - start_center.z).abs(),
     );
 
-    if distance_from_start > 0.75 {
-        jump_events.send(JumpEvent { entity });
+    if !is_at_start_block
+        && !is_at_jump_block
+        && (position.y - start.y as f64) < 0.094
+        && distance_from_start < 0.81
+    {
+        // we have to be on the start block to jump
+        ctx.look_at(start_center);
+    } else {
+        ctx.look_at(target_center);
+    }
+
+    if !is_at_start_block && is_at_jump_block && distance_from_start > required_distance_from_center
+    {
+        ctx.jump();
     }
 }
 

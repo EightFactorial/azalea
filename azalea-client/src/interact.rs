@@ -11,7 +11,6 @@ use azalea_entity::{
     clamp_look_direction, view_vector, Attributes, EyeHeight, LocalEntity, LookDirection, Position,
 };
 use azalea_inventory::{ItemSlot, ItemSlotData};
-use azalea_nbt::NbtList;
 use azalea_physics::clip::{BlockShapeType, ClipContext, FluidPickType};
 use azalea_protocol::packets::game::{
     serverbound_interact_packet::InteractionHand,
@@ -29,7 +28,8 @@ use bevy_ecs::{
     system::{Commands, Query, Res},
 };
 use derive_more::{Deref, DerefMut};
-use log::warn;
+use simdnbt::owned::NbtList;
+use tracing::warn;
 
 use crate::{
     attack::handle_attack_event,
@@ -37,6 +37,7 @@ use crate::{
     local_player::{
         handle_send_packet_event, LocalGameMode, PermissionLevel, PlayerAbilities, SendPacketEvent,
     },
+    movement::MoveEventsSet,
     respawn::perform_respawn,
     Client,
 };
@@ -62,7 +63,7 @@ impl Plugin for InteractPlugin {
                         .chain(),
                     update_modifiers_for_held_item
                         .after(InventorySet)
-                        .after(crate::movement::walk_listener),
+                        .after(MoveEventsSet),
                 ),
             );
     }
@@ -114,7 +115,7 @@ pub fn handle_block_interact_event(
     mut query: Query<(Entity, &mut CurrentSequenceNumber, &HitResultComponent)>,
     mut send_packet_events: EventWriter<SendPacketEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         let Ok((entity, mut sequence_number, hit_result)) = query.get_mut(event.entity) else {
             warn!("Sent BlockInteractEvent for entity that doesn't have the required components");
             continue;
@@ -271,9 +272,8 @@ pub fn check_block_can_be_broken_by_item_in_adventure_mode(
 
     let Some(can_destroy) = item
         .nbt
-        .as_compound()
-        .and_then(|nbt| nbt.get("tag").and_then(|nbt| nbt.as_compound()))
-        .and_then(|nbt| nbt.get("CanDestroy").and_then(|nbt| nbt.as_list()))
+        .compound("tag")
+        .and_then(|nbt| nbt.list("CanDestroy"))
     else {
         // no CanDestroy tag
         return false;
@@ -311,7 +311,7 @@ pub fn handle_swing_arm_event(
     mut events: EventReader<SwingArmEvent>,
     mut send_packet_events: EventWriter<SendPacketEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         send_packet_events.send(SendPacketEvent {
             entity: event.entity,
             packet: ServerboundSwingPacket {

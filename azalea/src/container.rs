@@ -10,6 +10,7 @@ use azalea_inventory::{operations::ClickOperation, ItemSlot, Menu};
 use azalea_protocol::packets::game::ClientboundGamePacket;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::{component::Component, prelude::EventReader, system::Commands};
+use futures_lite::Future;
 use std::fmt::Debug;
 
 use crate::bot::BotClientExt;
@@ -22,7 +23,10 @@ impl Plugin for ContainerPlugin {
 }
 
 pub trait ContainerClientExt {
-    async fn open_container(&mut self, pos: BlockPos) -> Option<ContainerHandle>;
+    fn open_container(
+        &mut self,
+        pos: BlockPos,
+    ) -> impl Future<Output = Option<ContainerHandle>> + Send;
     fn open_inventory(&mut self) -> Option<ContainerHandle>;
 }
 
@@ -79,6 +83,10 @@ impl ContainerClientExt for Client {
     /// Note that this will send a packet to the server once it's dropped. Also,
     /// due to how it's implemented, you could call this function multiple times
     /// while another inventory handle already exists (but you shouldn't).
+    ///
+    /// If you just want to get the items in the player's inventory without
+    /// sending any packets, use [`Client::menu`], [`Menu::player_slots_range`],
+    /// and [`Menu::slots`].
     fn open_inventory(&mut self) -> Option<ContainerHandle> {
         let ecs = self.ecs.lock();
         let inventory = ecs
@@ -129,6 +137,10 @@ impl ContainerHandle {
 
     /// Returns the menu of the container. If the container is closed, this
     /// will return `None`.
+    ///
+    /// Note that any modifications you make to the `Menu` you're given will not
+    /// actually cause any packets to be sent. If you're trying to modify your
+    /// inventory, use [`Client::open_inventory`] instead
     pub fn menu(&self) -> Option<Menu> {
         let ecs = self.client.ecs.lock();
         let inventory = ecs
@@ -167,8 +179,8 @@ impl ContainerHandle {
 pub struct WaitingForInventoryOpen;
 
 fn handle_menu_opened_event(mut commands: Commands, mut events: EventReader<PacketEvent>) {
-    for event in events.iter() {
-        if let ClientboundGamePacket::ContainerSetContent { .. } = event.packet {
+    for event in events.read() {
+        if let ClientboundGamePacket::ContainerSetContent { .. } = event.packet.as_ref() {
             commands
                 .entity(event.entity)
                 .remove::<WaitingForInventoryOpen>();
