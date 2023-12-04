@@ -1,5 +1,5 @@
 use crate::app::{App, Plugin};
-use azalea_client::chunk_batching::handle_chunk_batch_finished_event;
+use azalea_client::chunks::handle_chunk_batch_finished_event;
 use azalea_client::inventory::InventorySet;
 use azalea_client::packet_handling::{death_event_on_0_health, game::ResourcePackEvent};
 use azalea_client::respawn::perform_respawn;
@@ -30,7 +30,7 @@ fn accept_resource_pack(
     mut events: EventReader<ResourcePackEvent>,
     mut send_packet_events: EventWriter<SendPacketEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         send_packet_events.send(SendPacketEvent {
             entity: event.entity,
             packet: ServerboundResourcePackPacket {

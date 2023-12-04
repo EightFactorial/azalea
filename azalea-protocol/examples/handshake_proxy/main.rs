@@ -10,10 +10,10 @@ use azalea_protocol::{
     },
     ServerAddress,
 };
-use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
+use tracing::{error, info, warn};
 
 mod proxy;
 mod states;

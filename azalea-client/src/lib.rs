@@ -6,14 +6,12 @@
 //! [`azalea`]: https://docs.rs/azalea
 
 #![allow(incomplete_features)]
-#![feature(trait_upcasting)]
 #![feature(error_generic_member_access)]
-#![feature(type_alias_impl_trait)]
 
 mod account;
 pub mod attack;
 pub mod chat;
-pub mod chunk_batching;
+pub mod chunks;
 mod client;
 pub mod disconnect;
 mod entity_query;
@@ -28,7 +26,6 @@ pub mod packet_handling;
 pub mod ping;
 mod player;
 pub mod raw_connection;
-pub mod received_registries;
 pub mod respawn;
 pub mod task_pool;
 
@@ -43,4 +40,3 @@ pub use movement::{
     PhysicsState, SprintDirection, StartSprintEvent, StartWalkEvent, WalkDirection,
 };
 pub use player::PlayerInfo;
-pub use received_registries::ReceivedRegistries;

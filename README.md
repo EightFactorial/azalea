@@ -16,8 +16,8 @@ A collection of Rust crates for making Minecraft bots, clients, and tools.
 
 ## Features
 
-- [Accurate physics](https://github.com/azalea-rs/azalea/blob/main/azalea-physics/src/lib.rs) (but some features like knockback and water physics aren't yet implemented)
-- [Pathfinder](https://azalea.matdoes.dev/azalea/pathfinder/index.html) (parkour isn't perfect yet)
+- [Accurate physics](https://github.com/azalea-rs/azalea/blob/main/azalea-physics/src/lib.rs) (but some features like entity collisions and water physics aren't yet implemented)
+- [Pathfinder](https://azalea.matdoes.dev/azalea/pathfinder/index.html)
 - [Swarms](https://azalea.matdoes.dev/azalea/swarm/index.html)
 - [Breaking blocks](https://azalea.matdoes.dev/azalea/struct.Client.html#method.mine)
 - [Block interactions & building](https://azalea.matdoes.dev/azalea/struct.Client.html#method.block_interact) (this doesn't predict the block interactions/placement on the client yet but it's usually fine)
@@ -55,7 +55,7 @@ For fun, mostly. I wasn't satisfied with the current state of Minecraft bot libr
 
 There are several branches in the Azalea repository that target older Minecraft versions. It is not guaranteed that they will be up-to-date with the latest version of Azalea. If you'd like to update them or add more, please open a PR.
 
-- [1.20-1.20.1](https://github.com/mat-1/azalea/tree/1.20.1)
-- [1.19.4](https://github.com/mat-1/azalea/tree/1.19.4)
-- [1.19.3](https://github.com/mat-1/azalea/tree/1.19.3)
-- [1.19.2](https://github.com/mat-1/azalea/tree/1.19.2)
+- [1.20-1.20.1](https://github.com/azalea-rs/azalea/tree/1.20.1)
+- [1.19.4](https://github.com/azalea-rs/azalea/tree/1.19.4)
+- [1.19.3](https://github.com/azalea-rs/azalea/tree/1.19.3)
+- [1.19.2](https://github.com/azalea-rs/azalea/tree/1.19.2)

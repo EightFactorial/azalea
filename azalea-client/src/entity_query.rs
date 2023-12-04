@@ -25,7 +25,12 @@ impl Client {
     pub fn query<'w, Q: WorldQuery>(&self, ecs: &'w mut World) -> <Q as WorldQuery>::Item<'w> {
         ecs.query::<Q>()
             .get_mut(ecs, self.entity)
-            .expect("Our client is missing a required component.")
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Our client is missing a required component {:?}",
+                    std::any::type_name::<Q>()
+                )
+            })
     }
 
     /// Return a lightweight [`Entity`] for the entity that matches the given
@@ -51,6 +56,8 @@ impl Client {
     /// }
     /// # }
     /// ```
+    ///
+    /// [`Entity`]: bevy_ecs::entity::Entity
     pub fn entity_by<F: ReadOnlyWorldQuery, Q: ReadOnlyWorldQuery>(
         &mut self,
         predicate: impl EntityPredicate<Q, F>,
@@ -66,9 +73,12 @@ impl Client {
     pub fn entity_component<Q: Component + Clone>(&mut self, entity: Entity) -> Q {
         let mut ecs = self.ecs.lock();
         let mut q = ecs.query::<&Q>();
-        let components = q
-            .get(&ecs, entity)
-            .expect("Entity components must be present in Client::entity)components.");
+        let components = q.get(&ecs, entity).unwrap_or_else(|_| {
+            panic!(
+                "Entity is missing a required component {:?}",
+                std::any::type_name::<Q>()
+            )
+        });
         components.clone()
     }
 

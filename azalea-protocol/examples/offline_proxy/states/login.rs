@@ -12,7 +12,7 @@ use azalea_protocol::{
     },
     resolver, ServerAddress,
 };
-use log::{error, info};
+use tracing::{error, info};
 
 use crate::proxy::{
     self,

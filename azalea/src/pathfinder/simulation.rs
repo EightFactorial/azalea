@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use azalea_client::PhysicsState;
+use azalea_client::{inventory::InventoryComponent, PhysicsState};
 use azalea_core::{position::Vec3, resource_location::ResourceLocation};
 use azalea_entity::{
     attributes::AttributeInstance, metadata::Sprinting, Attributes, EntityDimensions, Physics,
@@ -11,7 +11,7 @@ use azalea_entity::{
 use azalea_world::{ChunkStorage, Instance, InstanceContainer, InstanceName, MinecraftEntityId};
 use bevy_app::{App, FixedUpdate};
 use bevy_ecs::prelude::*;
-use bevy_time::fixed_timestep::FixedTime;
+use bevy_time::{Fixed, Time};
 use parking_lot::RwLock;
 
 #[derive(Bundle, Clone)]
@@ -20,6 +20,7 @@ pub struct SimulatedPlayerBundle {
     pub physics: Physics,
     pub physics_state: PhysicsState,
     pub attributes: Attributes,
+    pub inventory: InventoryComponent,
 }
 
 impl SimulatedPlayerBundle {
@@ -37,6 +38,7 @@ impl SimulatedPlayerBundle {
                 speed: AttributeInstance::new(0.1),
                 attack_speed: AttributeInstance::new(4.0),
             },
+            inventory: InventoryComponent::default(),
         }
     }
 }
@@ -68,7 +70,7 @@ impl Simulation {
             azalea_client::task_pool::TaskPoolPlugin::default(),
         ))
         // make sure it doesn't do fixed ticks without us telling it to
-        .insert_resource(FixedTime::new(Duration::MAX))
+        .insert_resource(Time::<Fixed>::from_duration(Duration::MAX))
         .insert_resource(InstanceContainer {
             instances: [(instance_name.clone(), Arc::downgrade(&instance.clone()))]
                 .iter()

@@ -1,7 +1,7 @@
 use crate::{
     attack::{self, AttackPlugin},
     chat::ChatPlugin,
-    chunk_batching::{ChunkBatchInfo, ChunkBatchingPlugin},
+    chunks::{ChunkBatchInfo, ChunkPlugin},
     disconnect::{DisconnectEvent, DisconnectPlugin},
     events::{Event, EventPlugin, LocalPlayerEvents},
     interact::{CurrentSequenceNumber, InteractPlugin},
@@ -17,7 +17,7 @@ use crate::{
     raw_connection::RawConnection,
     respawn::RespawnPlugin,
     task_pool::TaskPoolPlugin,
-    Account, PlayerInfo, ReceivedRegistries,
+    Account, PlayerInfo,
 };
 
 use azalea_auth::{game_profile::GameProfile, sessionserver::ClientSessionServerError};
@@ -59,13 +59,12 @@ use bevy_ecs::{
     bundle::Bundle,
     component::Component,
     entity::Entity,
-    schedule::{IntoSystemConfigs, LogLevel, ScheduleBuildSettings, ScheduleLabel},
+    schedule::{InternedScheduleLabel, IntoSystemConfigs, LogLevel, ScheduleBuildSettings},
     system::{ResMut, Resource},
     world::World,
 };
-use bevy_time::{prelude::FixedTime, TimePlugin};
+use bevy_time::{Fixed, Time, TimePlugin};
 use derive_more::Deref;
-use log::{debug, error};
 use parking_lot::{Mutex, RwLock};
 use std::{
     collections::HashMap, fmt::Debug, io, net::SocketAddr, ops::Deref, sync::Arc, time::Duration,
@@ -75,6 +74,7 @@ use tokio::{
     sync::{broadcast, mpsc},
     time,
 };
+use tracing::{debug, error};
 use uuid::Uuid;
 
 /// `Client` has the things that a user interacting with the library will want.
@@ -99,8 +99,6 @@ pub struct Client {
     pub profile: GameProfile,
     /// The entity for this client in the ECS.
     pub entity: Entity,
-    /// The world that this client is in.
-    pub world: Arc<RwLock<PartialInstance>>,
 
     /// The entity component system. You probably don't need to access this
     /// directly. Note that if you're using a shared world (i.e. a swarm), this
@@ -133,7 +131,8 @@ pub enum JoinError {
 }
 
 impl Client {
-    /// Create a new client from the given GameProfile, Connection, and World.
+    /// Create a new client from the given [`GameProfile`], ECS Entity, ECS
+    /// World, and schedule runner function.
     /// You should only use this if you want to change these fields from the
     /// defaults, otherwise use [`Client::join`].
     pub fn new(
@@ -146,7 +145,6 @@ impl Client {
             profile,
             // default our id to 0, it'll be set later
             entity,
-            world: Arc::new(RwLock::new(PartialInstance::default())),
 
             ecs,
 
@@ -267,9 +265,9 @@ impl Client {
                     read_conn,
                     write_conn,
                 ),
-                received_registries: ReceivedRegistries::default(),
                 local_player_events: LocalPlayerEvents(tx),
                 game_profile: GameProfileComponent(game_profile),
+                client_information: crate::ClientInformation::default(),
                 account: account.to_owned(),
             },
             InConfigurationState,
@@ -427,16 +425,6 @@ impl Client {
         });
     }
 
-    pub fn local_player<'a>(&'a self, ecs: &'a mut World) -> &'a InstanceHolder {
-        self.query::<&InstanceHolder>(ecs)
-    }
-    pub fn local_player_mut<'a>(
-        &'a self,
-        ecs: &'a mut World,
-    ) -> bevy_ecs::world::Mut<'a, InstanceHolder> {
-        self.query::<&mut InstanceHolder>(ecs)
-    }
-
     pub fn raw_connection<'a>(&'a self, ecs: &'a mut World) -> &'a RawConnection {
         self.query::<&RawConnection>(ecs)
     }
@@ -470,17 +458,29 @@ impl Client {
         self.query::<Option<&T>>(&mut self.ecs.lock()).cloned()
     }
 
-    /// Get a reference to our (potentially shared) world.
+    /// Get an `RwLock` with a reference to our (potentially shared) world.
     ///
-    /// This gets the [`Instance`] from our world container. If it's a normal
-    /// client, then it'll be the same as the world the client has loaded.
-    /// If the client using a shared world, then the shared world will be a
-    /// superset of the client's world.
+    /// This gets the [`Instance`] from the client's [`InstanceHolder`]
+    /// component. If it's a normal client, then it'll be the same as the
+    /// world the client has loaded. If the client is using a shared world,
+    /// then the shared world will be a superset of the client's world.
     pub fn world(&self) -> Arc<RwLock<Instance>> {
-        let world_name = self.component::<InstanceName>();
-        let ecs = self.ecs.lock();
-        let instance_container = ecs.resource::<InstanceContainer>();
-        instance_container.get(&world_name).unwrap()
+        let instance_holder = self.component::<InstanceHolder>();
+        instance_holder.instance.clone()
+    }
+
+    /// Get an `RwLock` with a reference to the world that this client has
+    /// loaded.
+    ///
+    /// ```
+    /// # use azalea_core::position::ChunkPos;
+    /// # fn example(client: &azalea_client::Client) {
+    /// let world = client.partial_world();
+    /// let is_0_0_loaded = world.read().chunks.limited_get(&ChunkPos::new(0, 0)).is_some();
+    /// # }
+    pub fn partial_world(&self) -> Arc<RwLock<PartialInstance>> {
+        let instance_holder = self.component::<InstanceHolder>();
+        instance_holder.partial_instance.clone()
     }
 
     /// Returns whether we have a received the login packet yet.
@@ -516,7 +516,7 @@ impl Client {
         }
 
         if self.logged_in() {
-            log::debug!(
+            tracing::debug!(
                 "Sending client information (already logged in): {:?}",
                 client_information
             );
@@ -561,9 +561,9 @@ impl Client {
     /// Get the username of this client.
     ///
     /// This is a shortcut for
-    /// `bot.component::<GameProfileComponent>().name.clone()`.
+    /// `bot.component::<GameProfileComponent>().name.to_owned()`.
     pub fn username(&self) -> String {
-        self.component::<GameProfileComponent>().name.clone()
+        self.component::<GameProfileComponent>().name.to_owned()
     }
 
     /// Get the Minecraft UUID of this client.
@@ -590,9 +590,9 @@ impl Client {
 #[derive(Bundle)]
 pub struct LocalPlayerBundle {
     pub raw_connection: RawConnection,
-    pub received_registries: ReceivedRegistries,
     pub local_player_events: LocalPlayerEvents,
     pub game_profile: GameProfileComponent,
+    pub client_information: ClientInformation,
     pub account: Account,
 }
 
@@ -601,10 +601,9 @@ pub struct LocalPlayerBundle {
 /// use [`LocalEntity`].
 #[derive(Bundle)]
 pub struct JoinedClientBundle {
-    pub instance_holder: InstanceHolder,
+    // note that InstanceHolder isn't here because it's set slightly before we fully join the world
     pub physics_state: PhysicsState,
     pub inventory: InventoryComponent,
-    pub client_information: ClientInformation,
     pub tab_list: TabList,
     pub current_sequence_number: CurrentSequenceNumber,
     pub last_sent_direction: LastSentLookDirection,
@@ -630,7 +629,7 @@ pub struct AzaleaPlugin;
 impl Plugin for AzaleaPlugin {
     fn build(&self, app: &mut App) {
         // Minecraft ticks happen every 50ms
-        app.insert_resource(FixedTime::new(Duration::from_millis(50)))
+        app.insert_resource(Time::<Fixed>::from_duration(Duration::from_millis(50)))
             .add_systems(
                 Update,
                 (
@@ -673,14 +672,18 @@ pub fn start_ecs_runner(
 
 async fn run_schedule_loop(
     ecs: Arc<Mutex<World>>,
-    outer_schedule_label: Box<dyn ScheduleLabel>,
+    outer_schedule_label: InternedScheduleLabel,
     mut run_schedule_receiver: mpsc::UnboundedReceiver<()>,
 ) {
     loop {
+        // get rid of any queued events
+        while let Ok(()) = run_schedule_receiver.try_recv() {}
+
         // whenever we get an event from run_schedule_receiver, run the schedule
         run_schedule_receiver.recv().await;
+
         let mut ecs = ecs.lock();
-        ecs.run_schedule(&outer_schedule_label);
+        ecs.run_schedule(outer_schedule_label);
         ecs.clear_trackers();
     }
 }
@@ -777,7 +780,7 @@ impl PluginGroup for DefaultPlugins {
             .add(RespawnPlugin)
             .add(MinePlugin)
             .add(AttackPlugin)
-            .add(ChunkBatchingPlugin)
+            .add(ChunkPlugin)
             .add(TickBroadcastPlugin);
         #[cfg(feature = "log")]
         {

@@ -1,36 +1,34 @@
 use std::f32::consts::SQRT_2;
 
-use azalea_client::{SprintDirection, StartSprintEvent, StartWalkEvent, WalkDirection};
+use azalea_client::{SprintDirection, WalkDirection};
 use azalea_core::{
     direction::CardinalDirection,
     position::{BlockPos, Vec3},
 };
 
-use crate::{
-    pathfinder::{astar, costs::*},
-    JumpEvent, LookAtEvent,
-};
+use crate::pathfinder::{astar, costs::*};
 
 use super::{default_is_reached, Edge, ExecuteCtx, IsReachedCtx, MoveData, PathfinderCtx};
 
-pub fn basic_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, node: BlockPos) {
-    forward_move(edges, ctx, node);
-    ascend_move(edges, ctx, node);
-    descend_move(edges, ctx, node);
-    diagonal_move(edges, ctx, node);
+pub fn basic_move(ctx: &mut PathfinderCtx, node: BlockPos) {
+    forward_move(ctx, node);
+    ascend_move(ctx, node);
+    descend_move(ctx, node);
+    diagonal_move(ctx, node);
+    descend_forward_1_move(ctx, node);
 }
 
-fn forward_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
+fn forward_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let offset = BlockPos::new(dir.x(), 0, dir.z());
 
-        if !ctx.is_standable(pos + offset) {
+        if !ctx.world.is_standable(pos + offset) {
             continue;
         }
 
         let cost = SPRINT_ONE_BLOCK_COST;
 
-        edges.push(Edge {
+        ctx.edges.push(Edge {
             movement: astar::Movement {
                 target: pos + offset,
                 data: MoveData {
@@ -43,40 +41,26 @@ fn forward_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
     }
 }
 
-fn execute_forward_move(
-    ExecuteCtx {
-        entity,
-        target,
-        look_at_events,
-        sprint_events,
-        ..
-    }: ExecuteCtx,
-) {
-    let center = target.center();
-    look_at_events.send(LookAtEvent {
-        entity,
-        position: center,
-    });
-    sprint_events.send(StartSprintEvent {
-        entity,
-        direction: SprintDirection::Forward,
-    });
+fn execute_forward_move(mut ctx: ExecuteCtx) {
+    let center = ctx.target.center();
+    ctx.look_at(center);
+    ctx.sprint(SprintDirection::Forward);
 }
 
-fn ascend_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
+fn ascend_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let offset = BlockPos::new(dir.x(), 1, dir.z());
 
-        if !ctx.is_block_passable(pos.up(2)) {
+        if !ctx.world.is_block_passable(pos.up(2)) {
             continue;
         }
-        if !ctx.is_standable(pos + offset) {
+        if !ctx.world.is_standable(pos + offset) {
             continue;
         }
 
         let cost = SPRINT_ONE_BLOCK_COST + JUMP_PENALTY + *JUMP_ONE_BLOCK_COST;
 
-        edges.push(Edge {
+        ctx.edges.push(Edge {
             movement: astar::Movement {
                 target: pos + offset,
                 data: MoveData {
@@ -88,29 +72,19 @@ fn ascend_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
         })
     }
 }
-fn execute_ascend_move(
-    ExecuteCtx {
-        entity,
-        position,
+fn execute_ascend_move(mut ctx: ExecuteCtx) {
+    let ExecuteCtx {
         target,
         start,
-        look_at_events,
-        walk_events,
-        jump_events,
+        position,
         physics,
         ..
-    }: ExecuteCtx,
-) {
+    } = ctx;
+
     let target_center = target.center();
 
-    look_at_events.send(LookAtEvent {
-        entity,
-        position: target_center,
-    });
-    walk_events.send(StartWalkEvent {
-        entity,
-        direction: WalkDirection::Forward,
-    });
+    ctx.look_at(target_center);
+    ctx.walk(WalkDirection::Forward);
 
     // these checks are to make sure we don't fall if our velocity is too high in
     // the wrong direction
@@ -123,7 +97,7 @@ fn execute_ascend_move(
     let side_distance = z_axis as f64 * (target_center.x - position.x).abs()
         + x_axis as f64 * (target_center.z - position.z).abs();
 
-    let lateral_motion = x_axis as f64 * physics.delta.z + z_axis as f64 * physics.delta.x;
+    let lateral_motion = x_axis as f64 * physics.velocity.z + z_axis as f64 * physics.velocity.x;
     if lateral_motion > 0.1 {
         return;
     }
@@ -133,7 +107,7 @@ fn execute_ascend_move(
     }
 
     if BlockPos::from(position) == start {
-        jump_events.send(JumpEvent { entity });
+        ctx.jump();
     }
 }
 #[must_use]
@@ -145,30 +119,37 @@ pub fn ascend_is_reached(
     BlockPos::from(position) == target || BlockPos::from(position) == target.down(1)
 }
 
-fn descend_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
+fn descend_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let dir_delta = BlockPos::new(dir.x(), 0, dir.z());
         let new_horizontal_position = pos + dir_delta;
-        let fall_distance = ctx.fall_distance(new_horizontal_position);
+        let fall_distance = ctx.world.fall_distance(new_horizontal_position);
         if fall_distance == 0 || fall_distance > 3 {
             continue;
         }
         let new_position = new_horizontal_position.down(fall_distance as i32);
 
         // check whether 3 blocks vertically forward are passable
-        if !ctx.is_passable(new_horizontal_position) {
+        if !ctx.world.is_passable(new_horizontal_position) {
             continue;
         }
         // check whether we can stand on the target position
-        if !ctx.is_standable(new_position) {
+        if !ctx.world.is_standable(new_position) {
             continue;
         }
 
-        let cost = SPRINT_ONE_BLOCK_COST
-            + WALK_OFF_BLOCK_COST
-            + FALL_ONE_BLOCK_COST * fall_distance as f32;
+        let cost = WALK_OFF_BLOCK_COST
+            + f32::max(
+                FALL_N_BLOCKS_COST
+                    .get(fall_distance as usize)
+                    .copied()
+                    // avoid panicking if we fall more than the size of FALL_N_BLOCKS_COST
+                    // probably not possible but just in case
+                    .unwrap_or(f32::MAX),
+                CENTER_AFTER_FALL_COST,
+            );
 
-        edges.push(Edge {
+        ctx.edges.push(Edge {
             movement: astar::Movement {
                 target: new_position,
                 data: MoveData {
@@ -180,19 +161,17 @@ fn descend_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
         })
     }
 }
-fn execute_descend_move(
-    ExecuteCtx {
-        entity,
+fn execute_descend_move(mut ctx: ExecuteCtx) {
+    let ExecuteCtx {
         target,
         start,
-        look_at_events,
-        walk_events,
         position,
         ..
-    }: ExecuteCtx,
-) {
+    } = ctx;
+
     let start_center = start.center();
     let center = target.center();
+
     let horizontal_distance_from_target = (center - position).horizontal_distance_sqr().sqrt();
     let horizontal_distance_from_start =
         (start.center() - position).horizontal_distance_sqr().sqrt();
@@ -206,32 +185,16 @@ fn execute_descend_move(
     if BlockPos::from(position) != target || horizontal_distance_from_target > 0.25 {
         if horizontal_distance_from_start < 1.25 {
             // this basically just exists to avoid doing spins while we're falling
-            look_at_events.send(LookAtEvent {
-                entity,
-                position: dest_ahead,
-            });
-            walk_events.send(StartWalkEvent {
-                entity,
-                direction: WalkDirection::Forward,
-            });
+            ctx.look_at(dest_ahead);
+            ctx.walk(WalkDirection::Forward);
         } else {
-            look_at_events.send(LookAtEvent {
-                entity,
-                position: center,
-            });
-            walk_events.send(StartWalkEvent {
-                entity,
-                direction: WalkDirection::Forward,
-            });
+            ctx.look_at(center);
+            ctx.walk(WalkDirection::Forward);
         }
     } else {
-        walk_events.send(StartWalkEvent {
-            entity,
-            direction: WalkDirection::None,
-        });
+        ctx.walk(WalkDirection::None);
     }
 }
-
 #[must_use]
 pub fn descend_is_reached(
     IsReachedCtx {
@@ -251,27 +214,85 @@ pub fn descend_is_reached(
         && (position.y - target.y as f64) < 0.5
 }
 
-fn diagonal_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
+fn descend_forward_1_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
+    for dir in CardinalDirection::iter() {
+        let dir_delta = BlockPos::new(dir.x(), 0, dir.z());
+        let gap_horizontal_position = pos + dir_delta;
+        let new_horizontal_position = pos + dir_delta * 2;
+
+        let gap_fall_distance = ctx.world.fall_distance(gap_horizontal_position);
+        let fall_distance = ctx.world.fall_distance(new_horizontal_position);
+
+        if fall_distance == 0 || fall_distance > 3 || gap_fall_distance < fall_distance {
+            continue;
+        }
+
+        let new_position = new_horizontal_position.down(fall_distance as i32);
+
+        // check whether 2 blocks vertically forward are passable
+        if !ctx.world.is_passable(new_horizontal_position) {
+            continue;
+        }
+        if !ctx.world.is_passable(gap_horizontal_position) {
+            continue;
+        }
+        // check whether we can stand on the target position
+        if !ctx.world.is_standable(new_position) {
+            continue;
+        }
+
+        let cost = WALK_OFF_BLOCK_COST
+            + WALK_ONE_BLOCK_COST
+            + f32::max(
+                FALL_N_BLOCKS_COST
+                    .get(fall_distance as usize)
+                    .copied()
+                    // avoid panicking if we fall more than the size of FALL_N_BLOCKS_COST
+                    // probably not possible but just in case
+                    .unwrap_or(f32::MAX),
+                CENTER_AFTER_FALL_COST,
+            );
+
+        ctx.edges.push(Edge {
+            movement: astar::Movement {
+                target: new_position,
+                data: MoveData {
+                    execute: &execute_descend_move,
+                    is_reached: &descend_is_reached,
+                },
+            },
+            cost,
+        })
+    }
+}
+
+fn diagonal_move(ctx: &mut PathfinderCtx, pos: BlockPos) {
     for dir in CardinalDirection::iter() {
         let right = dir.right();
         let offset = BlockPos::new(dir.x() + right.x(), 0, dir.z() + right.z());
+        let left_pos = BlockPos::new(pos.x + dir.x(), pos.y, pos.z + dir.z());
+        let right_pos = BlockPos::new(pos.x + right.x(), pos.y, pos.z + right.z());
 
-        if !ctx.is_passable(BlockPos::new(pos.x + dir.x(), pos.y, pos.z + dir.z()))
-            && !ctx.is_passable(BlockPos::new(
-                pos.x + dir.right().x(),
-                pos.y,
-                pos.z + dir.right().z(),
-            ))
-        {
-            continue;
-        }
-        if !ctx.is_standable(pos + offset) {
-            continue;
-        }
         // +0.001 so it doesn't unnecessarily go diagonal sometimes
-        let cost = SPRINT_ONE_BLOCK_COST * SQRT_2 + 0.001;
+        let mut cost = SPRINT_ONE_BLOCK_COST * SQRT_2 + 0.001;
 
-        edges.push(Edge {
+        let left_passable = ctx.world.is_passable(left_pos);
+        let right_passable = ctx.world.is_passable(right_pos);
+
+        if !left_passable && !right_passable {
+            continue;
+        }
+
+        if !left_passable || !right_passable {
+            // add a bit of cost because it'll probably be hugging a wall here
+            cost += WALK_ONE_BLOCK_COST / 2.;
+        }
+
+        if !ctx.world.is_standable(pos + offset) {
+            continue;
+        }
+
+        ctx.edges.push(Edge {
             movement: astar::Movement {
                 target: pos + offset,
                 data: MoveData {
@@ -283,22 +304,9 @@ fn diagonal_move(edges: &mut Vec<Edge>, ctx: &PathfinderCtx, pos: BlockPos) {
         })
     }
 }
-fn execute_diagonal_move(
-    ExecuteCtx {
-        entity,
-        target,
-        look_at_events,
-        sprint_events,
-        ..
-    }: ExecuteCtx,
-) {
-    let center = target.center();
-    look_at_events.send(LookAtEvent {
-        entity,
-        position: center,
-    });
-    sprint_events.send(StartSprintEvent {
-        entity,
-        direction: SprintDirection::Forward,
-    });
+fn execute_diagonal_move(mut ctx: ExecuteCtx) {
+    let target_center = ctx.target.center();
+
+    ctx.look_at(target_center);
+    ctx.sprint(SprintDirection::Forward);
 }

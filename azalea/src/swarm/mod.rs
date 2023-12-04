@@ -16,11 +16,11 @@ use azalea_world::InstanceContainer;
 use bevy_app::{App, PluginGroup, PluginGroupBuilder, Plugins};
 use bevy_ecs::{component::Component, entity::Entity, system::Resource, world::World};
 use futures::future::{join_all, BoxFuture};
-use log::error;
 use parking_lot::{Mutex, RwLock};
 use std::{collections::HashMap, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tracing::error;
 
 use crate::{BoxHandleFn, DefaultBotPlugins, HandleFn, NoState};
 
@@ -350,22 +350,24 @@ where
                 // if there's a join delay, then join one by one
                 for (account, state) in accounts.iter().zip(states) {
                     swarm_clone
-                        .add_with_exponential_backoff(account, state.clone())
+                        .add_with_exponential_backoff(account, state)
                         .await;
                     tokio::time::sleep(join_delay).await;
                 }
             } else {
                 // otherwise, join all at once
                 let swarm_borrow = &swarm_clone;
-                join_all(accounts.iter().zip(states).map(
-                    async move |(account, state)| -> Result<(), JoinError> {
-                        swarm_borrow
-                            .clone()
-                            .add_with_exponential_backoff(account, state.clone())
-                            .await;
-                        Ok(())
-                    },
-                ))
+                join_all(
+                    accounts
+                        .iter()
+                        .zip(states)
+                        .map(move |(account, state)| async {
+                            swarm_borrow
+                                .clone()
+                                .add_with_exponential_backoff(account, state)
+                                .await;
+                        }),
+                )
                 .await;
             }
         });
@@ -387,10 +389,22 @@ where
         });
 
         // bot events
-        while let Some((Some(event), bot)) = bots_rx.recv().await {
+        while let Some((Some(first_event), first_bot)) = bots_rx.recv().await {
             if let Some(handler) = &self.handler {
-                let state = bot.component::<S>();
-                tokio::spawn((handler)(bot, event, state));
+                let first_bot_state = first_bot.component::<S>();
+                let first_bot_entity = first_bot.entity;
+
+                tokio::spawn((handler)(first_bot, first_event, first_bot_state.clone()));
+
+                // this makes it not have to keep locking the ecs
+                let mut states = HashMap::new();
+                states.insert(first_bot_entity, first_bot_state);
+                while let Ok((Some(event), bot)) = bots_rx.try_recv() {
+                    let state = states
+                        .entry(bot.entity)
+                        .or_insert_with(|| bot.component::<S>().clone());
+                    tokio::spawn((handler)(bot, event, state.clone()));
+                }
             }
         }
 

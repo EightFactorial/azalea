@@ -10,11 +10,12 @@ use azalea_protocol::{
     resolver, ServerAddress,
 };
 use log::info;
-use std::error::Error;
+use std::{error::Error, net::SocketAddr};
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpStream,
 };
+use tracing::info;
 
 /// Create a connection to the proxy target,
 /// repeat the packets recieved earlier, and

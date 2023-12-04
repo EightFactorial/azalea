@@ -122,10 +122,11 @@ impl ChatPacket {
 }
 
 impl Client {
-    /// Sends chat message to the server. This only sends the chat packet and
-    /// not the command packet. The [`Client::chat`] function handles checking
-    /// whether the message is a command and using the proper packet for you,
-    /// so you should use that instead.
+    /// Send a chat message to the server. This only sends the chat packet and
+    /// not the command packet, which means on some servers you can use this to
+    /// send chat messages that start with a `/`. The [`Client::chat`] function
+    /// handles checking whether the message is a command and using the
+    /// proper packet for you, so you should use that instead.
     pub fn send_chat_packet(&self, message: &str) {
         self.ecs.lock().send_event(SendChatKindEvent {
             entity: self.entity,
@@ -199,7 +200,7 @@ fn handle_send_chat_event(
     mut events: EventReader<SendChatEvent>,
     mut send_chat_kind_events: EventWriter<SendChatKindEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         if event.content.starts_with('/') {
             send_chat_kind_events.send(SendChatKindEvent {
                 entity: event.entity,
@@ -242,7 +243,7 @@ fn handle_send_chat_kind_event(
     mut events: EventReader<SendChatKindEvent>,
     mut send_packet_events: EventWriter<SendPacketEvent>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         let content = event
             .content
             .chars()

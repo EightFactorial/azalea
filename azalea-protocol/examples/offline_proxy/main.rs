@@ -10,9 +10,9 @@ use azalea_protocol::{
     },
     ServerAddress,
 };
-use log::{error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
+use tracing::{error, info, warn};
 
 mod proxy;
 mod states;
@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .without_time()
+        .compact()
         .init();
 
     // Get the listener and target addresses

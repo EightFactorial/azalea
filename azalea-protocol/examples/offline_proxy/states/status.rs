@@ -7,7 +7,7 @@ use azalea_protocol::{
     read::ReadPacketError,
     resolver, ServerAddress,
 };
-use log::error;
+use tracing::error;
 
 /// Reply with the proxy server information
 pub async fn status(

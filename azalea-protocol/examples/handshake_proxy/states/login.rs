@@ -10,7 +10,7 @@ use azalea_protocol::{
     ServerAddress,
 };
 use futures_util::FutureExt;
-use log::{error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::proxy;
 

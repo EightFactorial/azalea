@@ -7,7 +7,7 @@ use azalea_protocol::packets::{
         ServerboundGamePacket,
     },
 };
-use log::info;
+use tracing::info;
 
 use crate::proxy::{
     commands::{Command, OptionalCommand},

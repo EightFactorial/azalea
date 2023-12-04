@@ -30,7 +30,7 @@ impl<S> Clone for CommandContext<S> {
             command: self.command.clone(),
             root_node: self.root_node.clone(),
             nodes: self.nodes.clone(),
-            range: self.range.clone(),
+            range: self.range,
             child: self.child.clone(),
             modifier: self.modifier.clone(),
             forks: self.forks,
@@ -67,7 +67,7 @@ impl<S> CommandContext<S> {
             command: self.command.clone(),
             root_node: self.root_node.clone(),
             nodes: self.nodes.clone(),
-            range: self.range.clone(),
+            range: self.range,
             child: self.child.clone(),
             modifier: self.modifier.clone(),
             forks: self.forks,
@@ -78,7 +78,7 @@ impl<S> CommandContext<S> {
         !self.nodes.is_empty()
     }
 
-    pub fn argument(&self, name: &str) -> Option<Rc<dyn Any>> {
+    pub fn argument(&self, name: &str) -> Option<Arc<dyn Any>> {
         let argument = self.arguments.get(name);
         argument.map(|a| a.result.clone())
     }

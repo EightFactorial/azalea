@@ -7,7 +7,7 @@ use azalea_protocol::{
     },
     read::ReadPacketError,
 };
-use log::error;
+use tracing::error;
 
 use crate::{PROXY_DESC, PROXY_FAVICON, PROXY_PLAYERS, PROXY_SECURE_CHAT, PROXY_VERSION};
 
