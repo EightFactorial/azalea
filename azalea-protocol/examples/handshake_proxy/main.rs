@@ -1,8 +1,6 @@
 //! A "simple" server that gets login information and proxies connections.
 //! After login all connections are encrypted and Azalea cannot read them.
 
-use std::net::SocketAddr;
-
 use azalea_protocol::{
     connect::Connection,
     packets::{
@@ -10,6 +8,7 @@ use azalea_protocol::{
         status::clientbound_status_response_packet::{Players, Version},
         ConnectionProtocol, PROTOCOL_VERSION,
     },
+    ServerAddress,
 };
 use once_cell::sync::Lazy;
 use tokio::net::{TcpListener, TcpStream};
@@ -47,17 +46,15 @@ async fn main() -> anyhow::Result<()> {
         .without_time()
         .init();
 
-    // Bind to an address and port
-    let listener = match option_env!("LISTEN_ADDR") {
-        Some(addr) => TcpListener::bind(addr).await?,
-        None => TcpListener::bind(LISTEN_ADDR).await?,
-    };
+    // Get the listener and target addresses
+    let listener_addr = option_env!("LISTEN_ADDR").unwrap_or(LISTEN_ADDR);
+    let target_addr: ServerAddress = option_env!("PROXY_ADDR")
+        .unwrap_or(PROXY_ADDR)
+        .try_into()
+        .map_err(|addr| anyhow::anyhow!("Invalid proxy addr: {addr}"))?;
 
-    // Get the target address
-    let target: SocketAddr = match option_env!("PROXY_ADDR") {
-        Some(addr) => addr.parse()?,
-        None => PROXY_ADDR.parse()?,
-    };
+    // Bind to an address and port
+    let listener = TcpListener::bind(listener_addr).await?;
 
     loop {
         // When a connection is made, pass it off to another thread
@@ -67,12 +64,12 @@ async fn main() -> anyhow::Result<()> {
         if let Err(e) = stream.set_nodelay(true) {
             error!("Failed to set nodelay: {e}");
         } else {
-            tokio::spawn(handle_connection(stream, target));
+            tokio::spawn(handle_connection(stream, target_addr.clone()));
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream, target_addr: SocketAddr) -> anyhow::Result<()> {
+async fn handle_connection(stream: TcpStream, target_addr: ServerAddress) -> anyhow::Result<()> {
     // Get the ip address of the connecting client
     let Ok(client_addr) = stream.peer_addr() else {
         error!(target: "handshake_proxy::incoming", "Failed to get ip address of client");

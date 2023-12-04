@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use azalea_protocol::{
     connect::Connection,
     packets::{
@@ -7,17 +5,23 @@ use azalea_protocol::{
         status::{ClientboundStatusPacket, ServerboundStatusPacket},
     },
     read::ReadPacketError,
+    resolver, ServerAddress,
 };
 use tracing::error;
 
 /// Reply with the proxy server information
 pub async fn status(
     mut conn: Connection<ServerboundStatusPacket, ClientboundStatusPacket>,
-    intent: ClientIntentionPacket,
-    target_addr: SocketAddr,
+    mut intent: ClientIntentionPacket,
+    target_addr: ServerAddress,
 ) -> anyhow::Result<()> {
+    // Resolve and modify intent for target
+    let resolved_address = resolver::resolve_address(&target_addr).await?;
+    intent.hostname = target_addr.host.clone();
+    intent.port = target_addr.port;
+
     // Connect to the target server
-    let mut target_conn = Connection::new(&target_addr).await?;
+    let mut target_conn = Connection::new(&resolved_address).await?;
     target_conn
         .write(ServerboundHandshakePacket::ClientIntention(intent))
         .await?;
