@@ -1,4 +1,6 @@
 [workspace]
+resolver = "2"
+exclude = ["system-graph"]
 members = [
     "azalea",
     "azalea-auth",
@@ -17,7 +19,6 @@ members = [
     "azalea-registry",
     "azalea-world",
 ]
-resolver = "2"
 
 # --- Workspace Settings ---
 

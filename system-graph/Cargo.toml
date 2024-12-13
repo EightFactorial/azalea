@@ -1,0 +1,11 @@
+[package]
+name = "azalea-graph"
+description = "A tiny crate for printing azalea system graphs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/azalea-rs/azalea"
+
+[dependencies]
+azalea = { path = "../azalea" }
+bevy_mod_debugdump = "0.12.0"
