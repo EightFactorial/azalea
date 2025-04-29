@@ -43,7 +43,8 @@ use protocol::{ServerAddress, resolver::ResolverError};
 use swarm::SwarmBuilder;
 use thiserror::Error;
 
-pub type BoxHandleFn<S, R> = Box<dyn Fn(Client, azalea_client::Event, S) -> BoxFuture<'static, R>>;
+pub type BoxHandleFn<S, R> =
+    Box<dyn Fn(Client, azalea_client::Event, S) -> BoxFuture<'static, R> + Send>;
 pub type HandleFn<S, Fut> = fn(Client, azalea_client::Event, S) -> Fut;
 
 #[derive(Error, Debug)]

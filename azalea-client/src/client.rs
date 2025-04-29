@@ -30,7 +30,7 @@ use azalea_protocol::{
     resolver,
 };
 use azalea_world::{Instance, InstanceContainer, InstanceName, MinecraftEntityId, PartialInstance};
-use bevy_app::{App, Plugin, PluginsState, Update};
+use bevy_app::{App, Plugin, PluginsState, SubApp, Update};
 use bevy_ecs::{
     prelude::*,
     schedule::{InternedScheduleLabel, LogLevel, ScheduleBuildSettings},
@@ -123,7 +123,7 @@ impl<'a> StartClientOpts<'a> {
         resolved_address: &'a SocketAddr,
         event_sender: Option<mpsc::UnboundedSender<Event>>,
     ) -> StartClientOpts<'a> {
-        let mut app = App::new();
+        let mut app = std::mem::take(App::new().main_mut());
         app.add_plugins(DefaultPlugins);
 
         let (ecs_lock, start_running_systems) = start_ecs_runner(app);
@@ -667,7 +667,7 @@ impl Plugin for AzaleaPlugin {
 /// You can create your app with `App::new()`, but don't forget to add
 /// [`DefaultPlugins`].
 #[doc(hidden)]
-pub fn start_ecs_runner(mut app: App) -> (Arc<Mutex<World>>, impl FnOnce()) {
+pub fn start_ecs_runner(mut app: SubApp) -> (Arc<Mutex<World>>, impl FnOnce()) {
     // this block is based on Bevy's default runner:
     // https://github.com/bevyengine/bevy/blob/390877cdae7a17095a75c8f9f1b4241fe5047e83/crates/bevy_app/src/schedule_runner.rs#L77-L85
     if app.plugins_state() != PluginsState::Cleaned {
@@ -688,7 +688,7 @@ pub fn start_ecs_runner(mut app: App) -> (Arc<Mutex<World>>, impl FnOnce()) {
     let ecs = Arc::new(Mutex::new(mem::take(app.world_mut())));
 
     let ecs_clone = ecs.clone();
-    let outer_schedule_label = *app.main().update_schedule.as_ref().unwrap();
+    let outer_schedule_label = *app.update_schedule.as_ref().unwrap();
     let start_running_systems = move || {
         tokio::spawn(run_schedule_loop(ecs_clone, outer_schedule_label));
     };

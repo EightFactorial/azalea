@@ -23,7 +23,7 @@ use azalea_client::{
 };
 use azalea_protocol::{ServerAddress, resolver};
 use azalea_world::InstanceContainer;
-use bevy_app::{App, PluginGroup, PluginGroupBuilder, Plugins};
+use bevy_app::{App, PluginGroup, PluginGroupBuilder, Plugins, SubApp};
 use bevy_ecs::prelude::*;
 use futures::future::{BoxFuture, join_all};
 use parking_lot::{Mutex, RwLock};
@@ -71,7 +71,7 @@ where
     S: Send + Sync + Clone + Component + 'static,
     SS: Default + Send + Sync + Clone + Resource + 'static,
 {
-    pub(crate) app: App,
+    pub(crate) app: SubApp,
     /// The accounts and proxies that are going to join the server.
     pub(crate) accounts: Vec<(Account, JoinOpts)>,
     /// The individual bot states. This must be the same length as `accounts`,
@@ -131,7 +131,7 @@ impl SwarmBuilder<NoState, NoSwarmState, (), ()> {
         SwarmBuilder {
             // we create the app here so plugins can add onto it.
             // the schedules won't run until [`Self::start`] is called.
-            app: App::new(),
+            app: std::mem::take(&mut App::new().main_mut()),
             accounts: Vec::new(),
             states: Vec::new(),
             swarm_state: NoSwarmState,
@@ -394,7 +394,7 @@ where
 
         swarm_tx.send(SwarmEvent::Init).unwrap();
 
-        let main_schedule_label = self.app.main().update_schedule.unwrap();
+        let main_schedule_label = self.app.update_schedule.unwrap();
 
         let (ecs_lock, start_running_systems) = start_ecs_runner(self.app);
 
